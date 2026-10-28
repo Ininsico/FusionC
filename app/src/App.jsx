@@ -85,6 +85,184 @@ const STAGES = [
   },
 ]
 
+/* ------------------------------------------------------------------ parser lab */
+
+const TOKEN_LITERALS = {
+  SEMI: ';',
+  COMMA: ',',
+  COLON: ':',
+  EQ: '=',
+  ARROW: '->',
+  LPAREN: '(',
+  RPAREN: ')',
+  LBRACKET: '[',
+  RBRACKET: ']',
+  CONST: 'const',
+  DTYPE: 'dtype',
+  STORE: 'store',
+  ACCUM: 'accum',
+  INPUT: 'input',
+  PARAM: 'param',
+  FP16: 'fp16',
+  FP32: 'fp32',
+}
+
+function parseTokenLines(text) {
+  const rows = []
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+line\s+(\d+)\s+col\s+(\d+)\s+(\S+)\s*(.*)$/)
+    if (m) rows.push({ n: m[1], line: m[2], col: m[3], type: m[4], value: m[5].trim() })
+  }
+  return rows
+}
+
+function TokenTable({ text }) {
+  const rows = parseTokenLines(text)
+  if (rows.length === 0) return <pre className="code small">{text}</pre>
+  return (
+    <div className="token-wrap">
+      <table className="tokens">
+        <thead>
+          <tr>
+            <th className="num">#</th>
+            <th className="num">line:col</th>
+            <th>token</th>
+            <th>spelling</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.n}>
+              <td className="num">{r.n}</td>
+              <td className="num">
+                {r.line}:{r.col}
+              </td>
+              <td className="mono">{r.type}</td>
+              <td className="mono">{r.value || TOKEN_LITERALS[r.type] || ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* turns an indented dump ("  child", "    grandchild") into a box-drawing tree */
+function indentedToTree(text) {
+  const items = text
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => ({ depth: Math.floor(line.match(/^ */)[0].length / 2), label: line.trim() }))
+  const hasSiblingAfter = items.map((_, i) => {
+    for (let j = i + 1; j < items.length; j++) {
+      if (items[j].depth < items[i].depth) return false
+      if (items[j].depth === items[i].depth) return true
+    }
+    return false
+  })
+  const stack = []
+  const out = []
+  items.forEach((item, i) => {
+    stack[item.depth] = i
+    if (item.depth === 0) {
+      out.push(item.label)
+      return
+    }
+    let prefix = ''
+    for (let level = 1; level < item.depth; level++) {
+      const ancestor = stack[level]
+      prefix += ancestor !== undefined && hasSiblingAfter[ancestor] ? '│  ' : '   '
+    }
+    prefix += hasSiblingAfter[i] ? '├─ ' : '└─ '
+    out.push(prefix + item.label)
+  })
+  return out.join('\n')
+}
+
+function TreeView({ text }) {
+  return <pre className="code">{indentedToTree(text)}</pre>
+}
+
+function LabPanel({ title, tone, source, onSource, result }) {
+  return (
+    <div className="lab-panel">
+      <div className={`lab-title ${tone}`}>{title}</div>
+      <textarea value={source} spellCheck={false} onChange={(e) => onSource(e.target.value)} />
+      {!result && <p className="muted">press “Parse both cases” …</p>}
+      {result && (
+        <>
+          <div className={`verdict ${result.ok ? 'good' : 'bad'}`}>
+            {result.ok
+              ? 'ACCEPTED — the token stream satisfies the grammar'
+              : `REJECTED — ${result.error}`}
+          </div>
+          {result.ok ? (
+            <>
+              <p className="muted">
+                the tree that gets constructed (Program → declarations → pipeline → stages →
+                operation calls with expression arguments):
+              </p>
+              <TreeView text={result.ast} />
+            </>
+          ) : (
+            <p className="muted">
+              no tree is constructed: the parser stops at the first illegal token and throws —
+              nothing is handed to the next stage.
+            </p>
+          )}
+          {result.tokens && (
+            <details>
+              <summary>token stream ({parseTokenLines(result.tokens).length} tokens)</summary>
+              <TokenTable text={result.tokens} />
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ParseLab({ samples, sources, results, busy, onRun, onSourceChange }) {
+  return (
+    <section className="card">
+      <h2>grammar lab — the CFG, one valid case and one invalid case</h2>
+      <p className="muted">
+        The parser checks the token stream against these context-free grammar rules. Both
+        snippets below are editable — change them and parse again. The only statement form in
+        this language is the pipeline binding; expressions carry no operators, so they need no
+        precedence table.
+      </p>
+      <details open>
+        <summary>the CFG (this is what Parser.cup compiles into LALR(1) tables)</summary>
+        <pre className="code small">{samples.bnf}</pre>
+      </details>
+      <div className="controls">
+        <button className="run" onClick={onRun} disabled={busy}>
+          {busy ? 'parsing …' : 'Parse both cases'}
+        </button>
+      </div>
+      <div className="lab-grid">
+        <LabPanel
+          title="✓ a program that satisfies the grammar"
+          tone="good"
+          source={sources.valid}
+          onSource={(v) => onSourceChange('valid', v)}
+          result={results.valid}
+        />
+        <LabPanel
+          title="✗ a program that breaks the grammar"
+          tone="bad"
+          source={sources.invalid}
+          onSource={(v) => onSourceChange('invalid', v)}
+          result={results.invalid}
+        />
+      </div>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ dashboard */
+
 function WorkloadCard({ w, selected, onSelect, disabled }) {
   return (
     <button
@@ -202,11 +380,11 @@ function StageBody({ id, data, workload, onOpenFile }) {
             <span className="chip">{data.count} tokens</span>
             <span className="chip">each token knows its line and column</span>
           </div>
-          <pre className="code small">{data.text}</pre>
+          <TokenTable text={data.text} />
         </>
       )
     case 'parse':
-      return <pre className="code">{data.text}</pre>
+      return <TreeView text={data.text} />
     case 'semantics':
       return (
         <>
@@ -449,8 +627,29 @@ function App() {
   const [job, setJob] = useState(null)
   const [viewer, setViewer] = useState(null)
   const [recorded, setRecorded] = useState(null)
+  const [lab, setLab] = useState(null)
+  const [labSources, setLabSources] = useState({ valid: '', invalid: '' })
+  const [labResults, setLabResults] = useState({ valid: null, invalid: null })
+  const [labBusy, setLabBusy] = useState(false)
   const sinceRef = useRef(0)
   const logRef = useRef(null)
+  const labStarted = useRef(false)
+
+  const runLab = async (validSource, invalidSource) => {
+    setLabBusy(true)
+    try {
+      const [valid, invalid] = await Promise.all([
+        post('/api/parse', { source: validSource }),
+        post('/api/parse', { source: invalidSource }),
+      ])
+      setLabResults({ valid, invalid })
+    } catch (e) {
+      const failure = { ok: false, error: e.message, tokens: '', ast: '' }
+      setLabResults({ valid: failure, invalid: failure })
+    } finally {
+      setLabBusy(false)
+    }
+  }
 
   useEffect(() => {
     getJSON('/api/workloads')
@@ -460,6 +659,16 @@ function App() {
       })
       .catch((e) => setJob({ status: 'failed', log: [], error: e.message, progress: 0, total_steps: 9 }))
     getJSON('/api/recorded').then(setRecorded).catch(() => {})
+    getJSON('/api/parse-lab')
+      .then((samples) => {
+        setLab(samples)
+        setLabSources({ valid: samples.valid, invalid: samples.invalid })
+        if (!labStarted.current) {
+          labStarted.current = true
+          runLab(samples.valid, samples.invalid)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -619,6 +828,17 @@ function App() {
             </pre>
           )}
         </section>
+
+        {lab && (
+          <ParseLab
+            samples={lab}
+            sources={labSources}
+            results={labResults}
+            busy={labBusy}
+            onRun={() => runLab(labSources.valid, labSources.invalid)}
+            onSourceChange={(key, value) => setLabSources((s) => ({ ...s, [key]: value }))}
+          />
+        )}
 
         {STAGES.map((meta, i) => (
           <StageCard

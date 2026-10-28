@@ -659,6 +659,11 @@ The nine stages the UI walks through, in plain language:
 just triggered. A second card shows the recorded 500-iteration evaluation from
 `results/results.json` so live numbers can be compared against the report.
 
+A **grammar lab** card sits above the pipeline: it shows the CFG on screen and parses two
+editable snippets — one that satisfies the grammar (token stream + the constructed tree) and
+one that breaks it (token stream + the exact error position, e.g. `syntax error at line 9,
+column 23: unexpected ';'`) — with a single button. Handy for the syntax part of the viva.
+
 ---
 
 ## 11. Repository specification

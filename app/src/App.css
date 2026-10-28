@@ -636,3 +636,96 @@ td.mono.small {
   background: #090c11;
   white-space: pre;
 }
+
+/* ---- grammar lab ---- */
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .lab-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.lab-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.lab-title.good {
+  color: var(--good);
+}
+
+.lab-title.bad {
+  color: var(--bad);
+}
+
+.lab-panel textarea {
+  width: 100%;
+  min-height: 190px;
+  resize: vertical;
+  background: #090c11;
+  color: #b9c4d8;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 12px/1.6 var(--mono);
+  padding: 10px 12px;
+}
+
+.verdict {
+  font: 600 12px var(--mono);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+
+.verdict.good {
+  color: var(--good);
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.verdict.bad {
+  color: var(--bad);
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0 6px;
+}
+
+.token-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.token-wrap table {
+  font-size: 12px;
+}
+
+.token-wrap th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}

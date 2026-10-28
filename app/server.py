@@ -320,6 +320,97 @@ def run_job(job):
             active_job = None
 
 
+# ------------------------------------------------------------------ parse lab
+
+GRAMMAR_BNF = """\
+program    ::= decl_list stmt_list ;
+
+decl_list  ::= decl_list decl | (empty) ;
+decl       ::= CONST IDENT EQ INT SEMI
+             | DTYPE datatype STORE datatype ACCUM SEMI
+             | INPUT IDENT COLON datatype dims SEMI
+             | PARAM IDENT COLON datatype dims SEMI ;
+datatype   ::= FP16 | FP32 ;
+dims       ::= LBRACKET expr_list RBRACKET ;
+
+stmt_list  ::= stmt_list stmt | (empty) ;
+stmt       ::= IDENT EQ stage_list SEMI ;                  the only statement form
+stage_list ::= stage_list ARROW stage | stage ;            '->' chains: left-recursive => left-associative
+stage      ::= IDENT LPAREN arglist RPAREN | IDENT ;       op call, or a bare name
+arglist    ::= expr_list | (empty) ;
+
+expr_list  ::= expr_list COMMA expr | expr ;
+expr       ::= INT | FLOAT | IDENT | LPAREN expr RPAREN ;  no operators => no precedence table
+"""
+
+VALID_SAMPLE = """\
+// a VALID program: declarations first, then one pipeline statement
+const N = 8;
+
+dtype fp16 store fp32 accum;
+
+input x : fp16 [N, N];
+param w : fp16 [N, N];
+
+out = matmul(x, w) -> relu();
+"""
+
+INVALID_SAMPLE = """\
+// an INVALID program: the pipeline's second stage is missing
+const N = 8;
+
+dtype fp16 store fp32 accum;
+
+input x : fp16 [N, N];
+param w : fp16 [N, N];
+
+out = matmul(x, w) -> ;
+"""
+
+PARSE_LAB_DIR = DEMO_DIR / "parse_lab"
+
+
+def clean_frontend_error(proc):
+    """Strip the 'error: <file>.dsl: ' prefix from a compiler error message."""
+    text = (proc.stderr or proc.stdout).strip()
+    return re.sub(r"^error:\s*\S+\.dsl:\s*", "", text, count=1)
+
+
+@app.get("/api/parse-lab")
+def api_parse_lab():
+    return jsonify({"bnf": GRAMMAR_BNF, "valid": VALID_SAMPLE, "invalid": INVALID_SAMPLE})
+
+
+@app.post("/api/parse")
+def api_parse():
+    """Parse an arbitrary snippet: token stream + tree, or token stream + the error."""
+    body = request.get_json(force=True, silent=True) or {}
+    source = str(body.get("source", ""))
+    if not source.strip():
+        return jsonify({"ok": False, "tokens": "", "ast": "", "error": "empty input"})
+    PARSE_LAB_DIR.mkdir(parents=True, exist_ok=True)
+    src = PARSE_LAB_DIR / "input.dsl"
+    src.write_text(source, encoding="utf-8")
+    java = drv.find_java()
+
+    def jar(flag):
+        return subprocess.run(
+            [str(java), "-jar", str(JAR), "--input", str(src), flag, "--quiet",
+             "-o", str(PARSE_LAB_DIR / "lab.cu")],
+            capture_output=True, text=True, errors="replace", timeout=120)
+
+    tokens_proc = jar("--dump-tokens")
+    ast_proc = jar("--dump-ast")
+    tokens_text, _ = split_summary(tokens_proc.stdout)
+    ast_text, _ = split_summary(ast_proc.stdout)
+    ok = tokens_proc.returncode == 0 and ast_proc.returncode == 0
+    error = None
+    if not ok:
+        failed = ast_proc if ast_proc.returncode != 0 else tokens_proc
+        error = clean_frontend_error(failed)
+    return jsonify({"ok": ok, "tokens": tokens_text, "ast": ast_text, "error": error})
+
+
 # ------------------------------------------------------------------ endpoints
 
 @app.get("/api/health")

@@ -34,9 +34,33 @@ parser code {:
         if (tok == null || tok.sym == sym.EOF) {
             return "unexpected end of file";
         }
-        String text = tok.value != null ? tok.value.toString() : sym.terminalNames[tok.sym];
-        return "syntax error at line " + (tok.left + 1) + ", column " + (tok.right + 1)
+        String text = tok.value != null ? tok.value.toString() : literal(tok.sym);
+        return "syntax error at line " + tok.left + ", column " + tok.right
              + ": unexpected '" + text + "'";
+    }
+
+    /** Spelling of a valueless token as it appears in the source, for error messages. */
+    private String literal(int type) {
+        switch (type) {
+            case sym.SEMI:     return ";";
+            case sym.COMMA:    return ",";
+            case sym.COLON:    return ":";
+            case sym.EQ:       return "=";
+            case sym.ARROW:    return "->";
+            case sym.LPAREN:   return "(";
+            case sym.RPAREN:   return ")";
+            case sym.LBRACKET: return "[";
+            case sym.RBRACKET: return "]";
+            case sym.CONST:    return "const";
+            case sym.DTYPE:    return "dtype";
+            case sym.STORE:    return "store";
+            case sym.ACCUM:    return "accum";
+            case sym.INPUT:    return "input";
+            case sym.PARAM:    return "param";
+            case sym.FP16:     return "fp16";
+            case sym.FP32:     return "fp32";
+            default:           return sym.terminalNames[type];
+        }
     }
 :};
 
