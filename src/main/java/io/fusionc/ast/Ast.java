@@ -22,6 +22,12 @@ public final class Ast {
             this.decls = decls;
             this.pipelines = pipelines;
         }
+
+        /** Printing the parse result prints the tree -- the CyberScript-style Main pattern. */
+        @Override
+        public String toString() {
+            return dump(this);
+        }
     }
 
     // ------------------------------------------------------------- declarations
@@ -149,28 +155,34 @@ public final class Ast {
             }
         }
         for (Pipeline p : program.pipelines) {
-            sb.append("  pipeline ").append(p.output).append(" = ");
-            List<String> parts = new ArrayList<>();
-            for (Stage s : p.stages) {
-                parts.add(s instanceof Call ? dumpCall((Call) s) : ((Name) s).name);
+            sb.append("  pipeline ").append(p.output).append('\n');
+            for (int i = 0; i < p.stages.size(); i++) {
+                Stage s = p.stages.get(i);
+                if (s instanceof Call) {
+                    Call c = (Call) s;
+                    sb.append("    stage ").append(i + 1).append(": call ").append(c.op).append('\n');
+                    for (int j = 0; j < c.args.size(); j++) {
+                        sb.append("      arg ").append(j + 1).append(": ")
+                          .append(describeExpr(c.args.get(j))).append('\n');
+                    }
+                } else {
+                    sb.append("    stage ").append(i + 1).append(": ident ")
+                      .append(((Name) s).name).append('\n');
+                }
             }
-            sb.append(String.join(" -> ", parts)).append('\n');
         }
         return sb.toString();
     }
 
-    private static String dumpCall(Call c) {
-        List<String> args = new ArrayList<>();
-        for (Expr e : c.args) {
-            if (e instanceof IntLit) {
-                args.add(Long.toString(((IntLit) e).value));
-            } else if (e instanceof FloatLit) {
-                args.add(Double.toString(((FloatLit) e).value));
-            } else {
-                args.add(((Ref) e).name);
-            }
+    /** Expression node with its kind -- a grammar-level view of {@code INT | FLOAT | IDENT}. */
+    private static String describeExpr(Expr e) {
+        if (e instanceof IntLit) {
+            return "int " + ((IntLit) e).value;
         }
-        return c.op + "(" + String.join(", ", args) + ")";
+        if (e instanceof FloatLit) {
+            return "float " + ((FloatLit) e).value;
+        }
+        return "ident " + ((Ref) e).name;
     }
 
     private static String dimsToString(List<Expr> dims) {

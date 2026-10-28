@@ -388,19 +388,27 @@ def api_parse():
     source = str(body.get("source", ""))
     if not source.strip():
         return jsonify({"ok": False, "tokens": "", "ast": "", "error": "empty input"})
+    # unique working files per request: the UI fires the valid and the invalid
+    # case at the same time, and they must not race on a shared scratch file
+    token = uuid.uuid4().hex[:10]
     PARSE_LAB_DIR.mkdir(parents=True, exist_ok=True)
-    src = PARSE_LAB_DIR / "input.dsl"
+    src = PARSE_LAB_DIR / f"input_{token}.dsl"
+    out_cu = PARSE_LAB_DIR / f"lab_{token}.cu"
     src.write_text(source, encoding="utf-8")
     java = drv.find_java()
 
     def jar(flag):
         return subprocess.run(
             [str(java), "-jar", str(JAR), "--input", str(src), flag, "--quiet",
-             "-o", str(PARSE_LAB_DIR / "lab.cu")],
+             "-o", str(out_cu)],
             capture_output=True, text=True, errors="replace", timeout=120)
 
-    tokens_proc = jar("--dump-tokens")
-    ast_proc = jar("--dump-ast")
+    try:
+        tokens_proc = jar("--dump-tokens")
+        ast_proc = jar("--dump-ast")
+    finally:
+        src.unlink(missing_ok=True)
+        out_cu.unlink(missing_ok=True)
     tokens_text, _ = split_summary(tokens_proc.stdout)
     ast_text, _ = split_summary(ast_proc.stdout)
     ok = tokens_proc.returncode == 0 and ast_proc.returncode == 0

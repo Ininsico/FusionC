@@ -152,8 +152,9 @@ The JFlex/CUP jars are already in `tools/`.
 ## 4. The language
 
 Implemented by `src/main/jflex/Scanner.flex` (lexer) and `src/main/cup/Parser.cup` (grammar),
-which the build turns into `Scanner.java`, `parser.java` and `sym.java` under
-`build/generated/io/fusionc/frontend/`.
+which the build turns into `Scanner.java`, `parser.java` and `sym.java` in
+`src/main/java/io/fusionc/frontend/` (checked in, so any IDE resolves them with no extra
+setup).
 
 ### 4.1 A complete example
 
@@ -289,6 +290,32 @@ flowchart LR
 The scanner is generated into `io.fusionc.frontend.Scanner`, the parser into
 `io.fusionc.frontend.parser`; `DslParser` connects them (`new parser(new Scanner(reader))`).
 `--dump-tokens` prints the token stream; `--dump-ast` prints the tree.
+
+To run the front end on its own — tokens, then the tree the CUP parser built — use the
+standalone demo (exits non-zero and prints the exact position on a syntax error):
+
+```powershell
+java -cp build/fusionc.jar io.fusionc.ParseTree examples/attention_mlp.dsl
+.\scripts\parse-tree.ps1 examples\syntax_error.dsl        # shows the error path
+```
+
+It follows a classic teaching-parser architecture: the grammar's semantic actions announce each
+construct while parsing (the compiler keeps this trace off; the demo enables it), and the result
+is printed with `System.out.println(result)` — the tree object's own `toString()`.
+
+Or open the **derivation tree** in a Swing window — the start symbol at the top, expanding down
+through the grammar symbols to every terminal (each word of the program). The source on the
+right is editable: press **Parse (Ctrl+Enter)** and the tree is rebuilt live. A syntax error
+pops up a dialog with the exact position and selects the offending line in the editor.
+
+```powershell
+.\scripts\parse-tree-gui.ps1
+.\scripts\parse-tree-gui.ps1 examples\syntax_error.dsl     # error dialog + highlighted line
+```
+
+This is the *parse tree* (grammar symbols and terminals, built by the same CUP reductions);
+`--dump-ast` prints the *abstract syntax tree* the compiler consumes — the two are deliberately
+different, and both come from the same parse.
 
 ### 5.2 Middle end (semantics → IR → fusion)
 
@@ -659,11 +686,6 @@ The nine stages the UI walks through, in plain language:
 just triggered. A second card shows the recorded 500-iteration evaluation from
 `results/results.json` so live numbers can be compared against the report.
 
-A **grammar lab** card sits above the pipeline: it shows the CFG on screen and parses two
-editable snippets — one that satisfies the grammar (token stream + the constructed tree) and
-one that breaks it (token stream + the exact error position, e.g. `syntax error at line 9,
-column 23: unexpected ';'`) — with a single button. Handy for the syntax part of the viva.
-
 ---
 
 ## 11. Repository specification
@@ -680,7 +702,11 @@ compilerproject/
 │   └── java/io/fusionc/
 │       ├── Main.java               ← CLI: parse → IR → fusion → emit; flags, JSON log
 │       ├── FrontendException.java  ← the one error type (fail loudly)
-│       ├── frontend/DslParser.java ← wires scanner + parser together
+│       ├── frontend/               ← generated front end (checked in) + glue
+│       │   ├── Scanner.java  parser.java  sym.java   generated from the specs above
+│       │   └── DslParser.java      ← wires scanner + parser together
+│       ├── ParseTree.java          ← front-end demo: tokens + parse tree from the CLI
+│       ├── ParseTreeGui.java       ← Swing window: the parse tree drawn as a graph
 │       ├── ast/Ast.java            ← AST node classes + dump (§6.1)
 │       ├── semantics/GraphBuilder.java  ← declarations, macros, shapes, DAG (§5.2)
 │       ├── ir/                     ← IR DATA STRUCTURES (§6.2)
@@ -704,6 +730,8 @@ compilerproject/
 ├── driver/fusionc_driver.py        ← EVALUATION (§9): build, nvcc, run, compare, report
 ├── scripts/
 │   ├── build.ps1                   ← JFlex + CUP + javac + jar
+│   ├── parse-tree.ps1              ← console: tokens + parse tree for one .dsl
+│   ├── parse-tree-gui.ps1          ← Swing window: the parse tree as a graph
 │   └── start_demo.ps1              ← starts Flask + Vite for the dashboard
 │
 ├── app/                            ← WEB DASHBOARD (§10)
@@ -746,7 +774,6 @@ compilerproject/
 │
 └── build/                          ← GENERATED, git-ignored
     ├── fusionc.jar                 ← the compiler (built by scripts/build.ps1)
-    ├── generated/io/fusionc/frontend/{Scanner,parser,sym}.java
     ├── classes/                    ← compiled .class files
     └── demo/<workload>/            ← artifacts produced by dashboard runs
 ```
@@ -766,14 +793,21 @@ compilerproject/
 (111 tokens)
 ```
 
-**AST dump** (`--dump-ast`) — the tree, outermost first:
+**AST dump** (`--dump-ast`) — the tree, outermost first; pipelines nest down to their stages
+and argument expressions, and each argument line names the expression alternative the grammar
+produced (`ident`, `int`, `float`):
 
 ```
 Program
-  const SEQ = 64
+  const N = 8
   dtype store=fp16 accum=fp32
-  input Q : fp16 [SEQ, D]
-  pipeline out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2)
+  input x : fp16 [N, N]
+  param w : fp16 [N, N]
+  pipeline out
+    stage 1: call matmul
+      arg 1: ident x
+      arg 2: ident w
+    stage 2: call relu
 ```
 
 **IR dump** (`--ir file.txt`) — one row per node:
@@ -845,6 +879,13 @@ no header; `<name>.bin` per tensor.
 
 Exit status is 0 only if **everything** compiled, ran and matched the oracle — “it works” is
 machine-checked, not a screenshot.
+
+**Front end only:** `java -cp build/fusionc.jar io.fusionc.ParseTree <file.dsl>` (or
+`.\scripts\parse-tree.ps1 <file.dsl>`) prints the token stream and the parse tree the CUP
+parser built, and fails with the exact line/column on a syntax error.
+
+**Tree GUI:** `.\scripts\parse-tree-gui.ps1 [file.dsl]` opens the Swing viewer — the tree drawn
+as a graph next to the source, with a pop-up dialog on a syntax error.
 
 **Demos:** `python tools/live_demo.py [workload] [-i N]` (terminal), and
 `.\scripts\start_demo.ps1` (browser dashboard, §10).
@@ -970,3 +1011,7 @@ for both.
 * `results/<workload>/` keeps every generated `.cu`, its nvcc log with `ptxas -v` output, the
   decision JSON and the raw output tensors, so every number in the report can be traced back to
   the artifact that produced it.
+* The dashboard's dev server must run with **`NODE_ENV=development`** (`scripts/start_demo.ps1`
+  sets it). If it is started with `NODE_ENV=production`, Vite pre-bundles React's *production*
+  `jsx-dev-runtime` stub (`jsxDEV = void 0`) and the page stays blank with
+  `_jsxDEV is not a function` in the browser console.

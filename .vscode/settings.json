@@ -1,0 +1,5 @@
+{
+  "java.project.sourcePaths": ["src/main/java", "build/generated"],
+  "java.project.referencedLibraries": ["tools/java-cup-runtime.jar"],
+  "java.project.outputPath": "build/classes"
+}

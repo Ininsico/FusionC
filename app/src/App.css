@@ -729,3 +729,140 @@ details > summary {
   top: 0;
   background: var(--panel);
 }
+
+/* ---- parse tree graph ---- */
+
+.tree-wrap {
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+
+.tree,
+.tree ul {
+  display: flex;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.tree ul {
+  position: relative;
+  padding: 16px 0 0;
+  justify-content: center;
+}
+
+.tree li {
+  position: relative;
+  padding: 16px 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tree li::before,
+.tree li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  border-top: 2px solid var(--border);
+  width: 50%;
+  height: 16px;
+}
+
+.tree li::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid var(--border);
+}
+
+.tree li:only-child::after,
+.tree li:only-child::before {
+  display: none;
+}
+
+.tree li:only-child {
+  padding-top: 0;
+}
+
+.tree li:first-child::before,
+.tree li:last-child::after {
+  border: 0 none;
+}
+
+.tree li:last-child::before {
+  border-right: 2px solid var(--border);
+  border-radius: 0 5px 0 0;
+}
+
+.tree li:first-child::after {
+  border-radius: 5px 0 0 0;
+}
+
+.tree ul ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 2px solid var(--border);
+  width: 0;
+  height: 16px;
+}
+
+.tnode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  text-align: center;
+  max-width: 235px;
+}
+
+.tnode-label {
+  font: 12px/1.35 var(--mono);
+  color: var(--text);
+}
+
+.tnode-rule {
+  font: 10px/1.35 var(--mono);
+  color: var(--muted);
+}
+
+.tnode.root {
+  border-color: var(--accent);
+}
+
+.tnode.root .tnode-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tnode.stmt .tnode-label {
+  color: #fff;
+  font-weight: 600;
+}
+
+.tnode.stage {
+  border-color: rgba(122, 162, 255, 0.45);
+}
+
+.tnode.expr .tnode-label {
+  color: var(--muted);
+}
+
+/* ---- parse tree runner (executes the Java front end) ---- */
+
+.tree-run {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.log-error {
+  color: var(--bad);
+}

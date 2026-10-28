@@ -21,28 +21,27 @@ function Resolve-Java {
 $java  = Resolve-Java
 $javac = Join-Path (Split-Path -Parent $java) 'javac.exe'
 
-$gen     = 'build/generated'
-$pkg     = "$gen/io/fusionc/frontend"
+$pkg     = 'src/main/java/io/fusionc/frontend'
 $classes = 'build/classes'
-if (Test-Path $gen) { Remove-Item -Recurse -Force $gen }
+if (Test-Path $classes) { Remove-Item -Recurse -Force $classes }
 New-Item -ItemType Directory -Force -Path $pkg, $classes | Out-Null
 
-Write-Host '[1/4] JFlex: Scanner.flex -> build/generated/io/fusionc/frontend/Scanner.java'
+Write-Host '[1/4] JFlex: Scanner.flex -> src/main/java/io/fusionc/frontend/Scanner.java'
+# The generated scanner/parser/sym live in the source tree (standard for JFlex/CUP
+# projects): the build regenerates them, and IDEs resolve them without extra config.
 # %cup mode makes the generated scanner implement java_cup.runtime.Scanner, so JFlex itself
 # needs the CUP runtime on its classpath.
 & $java -cp 'tools/jflex.jar;tools/java-cup-runtime.jar' jflex.Main -d $pkg 'src/main/jflex/Scanner.flex'
 if ($LASTEXITCODE -ne 0) { throw 'jflex failed' }
 
-Write-Host '[2/4] CUP: Parser.cup -> sym.java + parser.java'
+Write-Host '[2/4] CUP: Parser.cup -> sym.java + parser.java (same package)'
 # the vbmacher java-cup jar ships no Main-Class attribute, so the entry point is named explicitly
 & $java -cp 'tools/java-cup.jar;tools/java-cup-runtime.jar' java_cup.Main `
     -package io.fusionc.frontend -parser parser -symbols sym -destdir $pkg 'src/main/cup/Parser.cup'
 if ($LASTEXITCODE -ne 0) { throw 'cup failed' }
 
 Write-Host '[3/4] javac'
-$sources = @()
-$sources += Get-ChildItem -Recurse -Filter *.java 'src/main/java' | ForEach-Object { $_.FullName }
-$sources += Get-ChildItem -Recurse -Filter *.java $gen | ForEach-Object { $_.FullName }
+$sources = Get-ChildItem -Recurse -Filter *.java 'src/main/java' | ForEach-Object { $_.FullName }
 & $javac -encoding UTF-8 -cp 'tools/java-cup-runtime.jar' -d $classes @sources
 if ($LASTEXITCODE -ne 0) { throw 'javac failed' }
 
