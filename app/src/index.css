@@ -1,0 +1,28 @@
+:root {
+  --bg: #0d1016;
+  --panel: #141922;
+  --panel-2: #1a2130;
+  --border: #232c3d;
+  --text: #dfe5f0;
+  --muted: #8894ab;
+  --accent: #7aa2ff;
+  --good: #4ade80;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  color-scheme: dark;
+  font: 15px/1.5 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}

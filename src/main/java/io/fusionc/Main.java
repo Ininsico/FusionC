@@ -35,6 +35,7 @@ public final class Main {
       + "  --sm-count <n>        SM count used by occupancy heuristics (default 6 = GTX 1050 Ti)\n"
       + "  --force-fusion        ignore profitability guards (resource caps still enforced)\n"
       + "  --dump-ast            print the parsed AST\n"
+      + "  --dump-tokens         print the JFlex token stream (lexer output)\n"
       + "  --quiet               do not print the decision log to stdout\n";
 
     public static void main(String[] args) {
@@ -45,6 +46,7 @@ public final class Main {
         boolean fused = true;
         boolean force = false;
         boolean dumpAst = false;
+        boolean dumpTokens = false;
         boolean quiet = false;
 
         try {
@@ -79,6 +81,9 @@ public final class Main {
                     case "--dump-ast":
                         dumpAst = true;
                         break;
+                    case "--dump-tokens":
+                        dumpTokens = true;
+                        break;
                     case "--quiet":
                         quiet = true;
                         break;
@@ -95,6 +100,13 @@ public final class Main {
             }
 
             File inputFile = new File(input);
+            if (dumpTokens) {
+                try {
+                    dumpTokens(inputFile, System.out);
+                } catch (IOException e) {
+                    throw new FrontendException("cannot read " + inputFile.getName() + ": " + e.getMessage());
+                }
+            }
             Ast.Program program = DslParser.parseFile(inputFile);
             if (dumpAst) {
                 System.out.print(Ast.dump(program));
@@ -128,6 +140,20 @@ public final class Main {
             System.err.println("error: cannot write output: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    /** Print the JFlex token stream: index, position, token type, semantic value. */
+    private static void dumpTokens(File input, PrintStream out) throws IOException {
+        io.fusionc.frontend.Scanner scanner =
+                new io.fusionc.frontend.Scanner(new java.io.FileReader(input, StandardCharsets.UTF_8));
+        java_cup.runtime.Symbol tok;
+        int index = 0;
+        while ((tok = scanner.next_token()).sym != io.fusionc.frontend.sym.EOF) {
+            String text = tok.value != null ? tok.value.toString() : "";
+            out.printf("%3d  line %2d col %2d  %-10s %s%n", ++index, tok.left, tok.right,
+                    io.fusionc.frontend.sym.terminalNames[tok.sym], text);
+        }
+        out.printf("(%d tokens)%n", index);
     }
 
     private static int countKernels(List<FusionGroup> groups) {

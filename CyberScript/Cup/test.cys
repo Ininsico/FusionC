@@ -1,4 +1,0 @@
-NETWORK Office
-IF PORT OPEN
-ALERT "SSH Port Exposed"
-END

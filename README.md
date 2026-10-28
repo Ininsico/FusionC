@@ -5,146 +5,197 @@ consumer Pascal GPUs** (`sm_61`: GTX 1050 Ti / GTX 1070 — no Tensor Cores, no 
 BF16, 48 KB shared memory per block, 255 registers per thread, CUDA 11.x toolchain).
 
 ```
-layer = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2);
+out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2);
 ```
 
-becomes, with `--fuse`, three kernels instead of eight — and the fused kernels are *generated
-from the IR*, never hand-written.
+becomes, with `--fuse`, three GPU kernels instead of eight — and the fused kernels are
+generated from the IR, never hand-written.
 
-This is the semester project for the Compilers course. The viva topic is **the grammar rules
-for statements and expressions of the language, including input and output**: that is
-[Section 2](#2-the-language--statements-expressions-and-io) and
-[Section 6](#6-live-demo-how-to-prove-it-works). Everything else is the machinery around it.
-
----
-
-## The one-paragraph summary
-
-* **Input:** a 10-line DSL program (tensor declarations + pipelines).
-* **Output:** a self-contained `.cu` file (kernels + static memory plan + host harness) that
-  compiles with `nvcc -arch=sm_61` and runs on the GPU.
-* **In between:** JFlex lexer → CUP LALR parser → AST → shape/dtype inference → macro expansion
-  of composite ops → 15-node IR DAG → fusion pass with a Pascal resource cost model → CUDA C
-  emitter.
-* **Proof:** 3 workloads × 3 build modes + a hand-written reference (10 compiled variants), all
-  matching an fp64 oracle element-wise, **1.16x–1.30x fused-vs-unfused speedups**, zero register
-  spills, and every fusion decision (accepted *and* rejected) logged with its predicted
-  resources and scored by measurement. Full numbers: [`docs/REPORT.md`](docs/REPORT.md).
+This is a semester project for a Compilers course. Everything in it is measured on a real GPU
+and every optimisation decision is logged, so nothing has to be taken on faith.
 
 ---
 
 ## Contents
 
-1. [What this project is, and why](#1-what-this-project-is-and-why)
-2. [The language — statements, expressions, and I/O](#2-the-language--statements-expressions-and-io)
-3. [Compiler architecture (what happens to a program)](#3-compiler-architecture)
-4. [What the compiler generates](#4-what-the-compiler-generates)
-5. [Build from source](#5-build-from-source)
-6. [Live demo: how to prove it works](#6-live-demo-how-to-prove-it-works)
-7. [Evaluation: the four metrics and the measured results](#7-evaluation-the-four-metrics)
-8. [Pascal-specific design decisions](#8-pascal-specific-design-decisions)
-9. [Known limitations and future work](#9-known-limitations-and-future-work)
-10. [Repository layout](#10-repository-layout)
-11. [Viva cheat sheet (Q&A)](#11-viva-cheat-sheet)
-12. [Appendix A: the `CyberScript/` folder](#appendix-a-the-cyberscript-folder)
-13. [Appendix B: toolchain notes (this machine)](#appendix-b-toolchain-notes-this-machine)
+1. [The one-page summary](#1-the-one-page-summary)
+2. [The big picture — what happens end to end](#2-the-big-picture)
+3. [Quick start](#3-quick-start)
+4. [The language](#4-the-language)
+5. [Compiler internals, pass by pass](#5-compiler-internals)
+6. [Data structures](#6-data-structures)
+7. [The generated CUDA C](#7-the-generated-cuda-c)
+8. [The fusion decision — the core idea](#8-the-fusion-decision)
+9. [Evaluation pipeline and measured results](#9-evaluation-pipeline-and-measured-results)
+10. [The web dashboard](#10-the-web-dashboard)
+11. [Repository specification](#11-repository-specification)
+12. [File formats](#12-file-formats)
+13. [Command reference](#13-command-reference)
+14. [Viva cheat sheet](#14-viva-cheat-sheet)
+15. [Pascal-specific design decisions](#15-pascal-specific-design-decisions)
+16. [Limitations and future work](#16-limitations-and-future-work)
+17. [Appendix A — toolchain notes (this machine)](#appendix-a--toolchain-notes)
 
 ---
 
-## 1. What this project is, and why
+## 1. The one-page summary
 
-### The problem
+* **Input:** a 10-line DSL program describing a tensor graph (tensors + pipelines).
+* **Output:** a self-contained `.cu` file — GPU kernels + memory plan + a host program that
+  loads inputs, times everything and dumps results.
+* **In between:** JFlex lexer → CUP LALR parser → AST → shape/dtype inference with composite-op
+  expansion → 15-node IR DAG → fusion pass with a Pascal resource cost model → CUDA C emitter.
+* **The optimisation:** producer→consumer operations are fused so intermediate values stay in
+  registers / shared memory instead of round-tripping through DRAM, and fewer kernel launches
+  are needed.
+* **The proof:** 3 workloads × 3 build modes + 1 hand-written reference = **10 compiled
+  variants, all matching a float64 oracle element-wise**, 1.06×–1.30× fused-vs-naive speedups,
+  zero register spills, and every fusion decision — accepted *and* rejected — measured and
+  scored. Full tables: [`docs/REPORT.md`](docs/REPORT.md).
 
-Transformer-style inference on a cheap consumer GPU is bottlenecked by three things on Pascal:
+**Where things live (30-second orientation):**
 
-1. **Memory bandwidth.** A naive implementation materialises every intermediate tensor
-   (attention scores, softmax probabilities, hidden activations...) as a full round-trip to
-   DRAM. On a 1050 Ti that traffic costs more than the arithmetic.
-2. **Kernel launch overhead.** A 64-token workload splits into many tiny kernels; on Windows
-   (WDDM) each launch has tens of microseconds of overhead, which can dwarf the kernel itself.
-3. **Hardware limits.** GP10x has no Tensor Cores, no async copy (`cp.async`), only 48 KB of
-   shared memory per block, and runs FP16 *arithmetic* at 1/64 of the FP32 rate — so half
-   precision can be used for **storage** only.
-
-### What we built
-
-A complete compiler that takes a graph description and produces CUDA C which avoids those
-costs by **fusing producer→consumer operations** under an explicit, measurable resource model:
-
-* intermediates stay in registers or shared memory instead of DRAM,
-* fusing an op pair removes a kernel launch,
-* every fusion is a *decision*: predicted cost first (`ResourceModel`), Pascal-specific
-  acceptance rules (`PascalHeuristics`), and a human-readable reason logged whether it is
-  accepted or rejected,
-* rejected candidates are still compiled and measured (`--force-fusion`), so the rejections
-  themselves are validated rather than assumed.
-
-### The four required metrics
-
-The brief (and the report) covers four things, all measured, never estimated:
-
-| # | metric | where |
-|---|---|---|
-| 1 | correctness vs a reference implementation | fp64 numpy oracle + hand-written CUDA reference |
-| 2 | `ptxas -v` register / shared-memory / spill statistics | per kernel, every variant |
-| 3 | fused vs unfused runtime (CUDA events) | per region and per total |
-| 4 | fusion decision quality (improved / neutral / degraded) | per decision, including rejected ones |
-
-`driver/fusionc_driver.py` produces all four automatically into `docs/REPORT.md` and raw
-`results/results.json`. It exits non-zero if anything fails to compile, run, or validate.
+| you want to… | go to |
+|---|---|
+| read the language definition | [`docs/DSL_SPEC.md`](docs/DSL_SPEC.md), §4 below |
+| see the lexer / grammar | `src/main/jflex/Scanner.flex`, `src/main/cup/Parser.cup` |
+| see the compiler logic | `src/main/java/io/fusionc/` (§5, §6) |
+| compile something | `java -jar build/fusionc.jar --input examples/attention_mlp.dsl --fuse -o out.cu` |
+| watch the whole pipeline live | `.\scripts\start_demo.ps1` → <http://localhost:5173> (§10) |
+| see the measurements | [`docs/REPORT.md`](docs/REPORT.md), `results/results.json` |
+| run the full evaluation | `python driver/fusionc_driver.py` |
 
 ---
 
-## 2. The language — statements, expressions, and I/O
+## 2. The big picture
 
-Everything in this section is implemented by
-`src/main/jflex/Scanner.flex` (lexer) and `src/main/cup/Parser.cup` (LALR grammar), which the
-build script turns into `Scanner.java`, `parser.java` and `sym.java` under
+```mermaid
+flowchart LR
+    subgraph YOU["what you write"]
+        DSL["program.dsl<br/>tensor pipelines, plain text"]
+    end
+
+    subgraph JAR["fusionc.jar — the compiler (Java)"]
+        FE["front end<br/>JFlex + CUP"]
+        ME["middle end<br/>semantics · IR · fusion"]
+        BE["back end<br/>CUDA C emitters"]
+    end
+
+    subgraph TOOLCHAIN["build + run (this machine)"]
+        NVCC["nvcc 11.8<br/>-arch=sm_61"]
+        GPU["GPU program<br/>runs on the graphics card"]
+    end
+
+    subgraph MEASURE["measurement"]
+        DRV["driver/fusionc_driver.py"]
+        REP["docs/REPORT.md<br/>results/results.json"]
+    end
+
+    DSL --> FE --> ME --> BE
+    BE -->|"out.cu"| NVCC --> GPU
+    BE -->|"decisions.json + ir.txt"| DRV
+    GPU -->|"timings + output tensors"| DRV --> REP
+```
+
+Read it left to right: **text goes in, GPU program comes out**, and everything the compiler
+decides on the way (including what it *refuses* to do) is recorded and fed into the measurement
+that produces the report.
+
+Inside the compiler, the flow is the classic one:
+
+```mermaid
+flowchart TB
+    TEXT["source text"] --> LEX["lexing<br/>JFlex DFA"]
+    LEX --> TOK["tokens<br/>(type, line, column, value)"]
+    TOK --> PAR["parsing<br/>CUP LALR(1)"]
+    PAR --> AST["AST — syntax only"]
+    AST --> SEM["semantics<br/>macro expansion · shapes · dtypes"]
+    SEM --> IR["IR — a data-flow graph"]
+    IR --> FUS["fusion pass<br/>cost model + Pascal heuristics"]
+    FUS --> GRP["FusionGroup[]<br/>one group = one kernel"]
+    GRP --> EMIT["emitters"]
+    EMIT --> CU["out.cu"]
+    FUS -.->|"every accept/reject<br/>with a reason"| DEC["decisions.json"]
+```
+
+---
+
+## 3. Quick start
+
+```powershell
+# 1. build the compiler            (JFlex + CUP + javac -> build/fusionc.jar)
+.\scripts\build.ps1
+
+# 2. compile the reference program
+java -jar build/fusionc.jar --input examples/attention_mlp.dsl --fuse -o build\attn_fused.cu
+
+# 3. look at the generated GPU code (open build\attn_fused.cu), or ask for the logs:
+java -jar build/fusionc.jar --input examples/attention_mlp.dsl --fuse `
+     --ir build\attn.ir.txt --decisions build\attn.decisions.json -o build\attn_fused.cu
+
+# 4. compile that CUDA file and run it on the GPU
+#    (the evaluation driver does this for you, step 5)
+
+# 5. full measured evaluation -> docs/REPORT.md + results/results.json
+python driver/fusionc_driver.py
+
+# 6. the live dashboard (browser front end for everything above)
+.\scripts\start_demo.ps1            # then open http://localhost:5173
+```
+
+Requirements: JDK 11+, Python 3 with `numpy` (and `flask` for the dashboard), Node/npm for the
+dashboard front end, CUDA 11.8 + a supported MSVC toolset for compiling the *generated* code.
+The JFlex/CUP jars are already in `tools/`.
+
+---
+
+## 4. The language
+
+Implemented by `src/main/jflex/Scanner.flex` (lexer) and `src/main/cup/Parser.cup` (grammar),
+which the build turns into `Scanner.java`, `parser.java` and `sym.java` under
 `build/generated/io/fusionc/frontend/`.
 
-### 2.1 A complete example
+### 4.1 A complete example
 
 `examples/attention_mlp.dsl` — the reference workload:
 
 ```
-// SEQ tokens, D model dim, F feed-forward dim
-const SEQ = 64;
+const SEQ = 64;                 // compile-time constants
 const D   = 256;
 const F   = 1024;
 
-dtype fp16 store fp32 accum;
+dtype fp16 store fp32 accum;    // numeric policy: fp16 in memory, fp32 arithmetic
 
-input Q  : fp16 [SEQ, D];
+input Q  : fp16 [SEQ, D];       // host-supplied inputs
 input K  : fp16 [SEQ, D];
 input V  : fp16 [SEQ, D];
 
-param W1 : fp16 [D, F];
+param W1 : fp16 [D, F];         // host-supplied weights / biases
 param b1 : fp32 [F];
 param W2 : fp16 [F, D];
 param b2 : fp32 [D];
 
-out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2);
+out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2);   // one pipeline
 ```
 
-### 2.2 Lexical structure (JFlex scanner)
+### 4.2 Lexical structure (JFlex scanner)
 
 | category | tokens |
 |---|---|
 | keywords | `const` `dtype` `store` `accum` `input` `param` `fp16` `fp32` |
 | punctuation | `= ; , : ( ) [ ] ->` |
 | literals | `INT` = `[0-9]+` · `FLOAT` = `1.5`, `2e-3`, `1.5e+2` · `IDENT` = `[A-Za-z_][A-Za-z0-9_]*` |
-| comments | `// ...` (line) · `# ...` (line) · `/* ... */` (block) |
-| whitespace | spaces, tabs, newlines — skipped |
+| comments | `// …` line · `# …` line · `/* … */` block |
+| whitespace | skipped |
 
-Keywords are lowercase and case-sensitive. The scanner runs in JFlex `%cup` mode, so
-`next_token()` returns `java_cup.runtime.Symbol` objects carrying `(type, line, column, value)`
-with 1-based line/column for diagnostics. **Any illegal character is a hard error** — e.g.
-`lexical error at line 3, column 7: illegal character '@'` — and the compiler exits with
-status 1. It never guesses.
+Keywords are lowercase and case-sensitive. The scanner runs in JFlex `%cup` mode: `next_token()`
+returns `java_cup.runtime.Symbol` objects carrying `(type, line, column, value)` with 1-based
+line/column. Any illegal character is a hard error — `lexical error at line 3, column 7:
+illegal character '@'` — and the compiler exits with status 1. It never guesses.
 
-### 2.3 The whole grammar (as implemented in `Parser.cup`)
+### 4.3 Grammar
 
-This is the exact BNF, CUP `terminal`/`non terminal` names included:
+The full BNF, exactly as in `Parser.cup`:
 
 ```
 program    ::= decl_list stmt_list ;
@@ -167,120 +218,36 @@ expr_list  ::= expr_list COMMA expr | expr ;
 expr       ::= INT | FLOAT | IDENT | LPAREN expr RPAREN ;
 ```
 
-Two structural facts worth pointing out in the viva:
+Two structural facts worth pointing at in a viva:
 
-* A program is **declarations first, then statements** (`program ::= decl_list stmt_list`).
-  Declarations cannot be interleaved with pipelines, and a constant/tensor can therefore never
-  be used before it is declared.
-* The `ARROW` token is `->` — the sequential-composition operator of the pipeline language.
+* A program is **declarations first, then statements** (`program ::= decl_list stmt_list`);
+  constants and tensors can never be used before they are declared.
+* **Statements** are pipeline bindings; **expressions** appear only inside tensor dimensions
+  (`dims`) and operation arguments (`arglist`). There are no infix operators, so the expression
+  grammar needs **no precedence table** — the only associativity is the `->` chain, which is
+  left-associative because `stage_list` is left-recursive. CUP builds this into **22 terminals,
+  12 non-terminals, 26 productions, 56 LALR(1) parse states — 0 conflicts, 0 warnings** (the
+  build prints that summary on every run).
 
-Run through CUP, this grammar produces **22 terminals, 12 non-terminals, 26 productions and 56
-LALR(1) parse states with 0 conflicts and 0 warnings** (the build prints this summary on every
-run) — the unambiguous-parsing claim is printed by the toolchain, not asserted by us.
+### 4.4 Semantics and error handling
 
-### 2.4 Grammar rules for **statements**
-
-There is exactly one statement form: the **pipeline binding**.
-
-```
-stmt       ::= IDENT EQ stage_list SEMI ;
-stage_list ::= stage_list ARROW stage | stage ;
-stage      ::= IDENT LPAREN arglist RPAREN | IDENT ;
-```
-
-* `name = stage -> stage -> ... ;` binds the pipeline result to `name`, which becomes a new
-  tensor. Later pipelines may reference it (see `examples/residual_block.dsl`, where `norm`,
-  `att`, `res` are consumed by later statements).
-* A **stage** is either an operation call (`attention(Q, K, V)`, `MLP(...)`, `relu(...)`) or a
-  **bare identifier** (`res -> MLP(...)`).
-* `->` means "feed the previous stage's result into this stage as its subject (first
-  positional argument)".
-* The rule `stage_list ::= stage_list ARROW stage` is **left-recursive, so `->` is
-  left-associative**: `a -> b -> c` groups as `(a -> b) -> c`. This is the only associativity
-  in the language, and it is unambiguous for LALR(1) — CUP parses it with no precedence
-  declarations at all.
-* `stmt_list` is also left-recursive: a program is a sequence of pipelines in source order.
-
-### 2.5 Grammar rules for **expressions**
-
-```
-expr_list ::= expr_list COMMA expr | expr ;
-expr      ::= INT | FLOAT | IDENT | LPAREN expr RPAREN ;
-```
-
-Expressions appear in exactly two places: **tensor dimensions** (`dims`) and **operator
-arguments** (`arglist`). An expression is a fragment: an integer literal, a float literal, a
-reference by name, or a parenthesised sub-expression (parentheses are grouping only — the
-semantic action returns the inner expression unchanged).
-
-**There are no infix operators, so the expression grammar has no precedence table — nothing
-can be ambiguous.** This is a deliberate design decision: the language describes a *dataflow
-graph*, not arithmetic. Computation is expressed by naming operations in pipelines; numeric
-precision is expressed by the `dtype ... store ... accum` declaration. Names inside
-expressions are resolved semantically:
-
-* in `dims`, an `IDENT` must be a previously declared constant (`SEQ`, `D`, `F`); a non-integer
-  or unknown dimension is a compile error (`tensor 'x' has a non-integer dimension`,
-  `unknown constant 'FOO'`).
-* in `arglist`, an `IDENT` must be a declared tensor — except in the activation slot of
-  `MLP(W1, act, W2, ...)`, where `relu` / `gelu` name an activation function.
-
-> If your examiner expects a *classic* expression grammar with precedence and associativity,
-> the honest answer is: this language intentionally has none, because it has no expression
-> operators; the only chaining construct is `->` at statement level, and its left
-> associativity comes from the left-recursive `stage_list` rule. (The separate `CyberScript/`
-> folder — [Appendix A](#appendix-a-the-cyberscript-folder) — contains an earlier exercise
-> whose grammar *does* have precedence: `PLUS/MINUS` left-associative, `MULT/DIV` higher.)
-
-### 2.6 What the parser builds (AST)
-
-Each grammar rule has a semantic action building an `io.fusionc.ast.Ast` node
-(`Program`, `ConstDecl`, `DtypeDecl`, `TensorDecl`, `Pipeline`, `Call`, `Name`, `IntLit`,
-`FloatLit`, `Ref`). You can print the parse result with `--dump-ast` — real output for the
-reference example:
-
-```
-Program
-  const SEQ = 64
-  const D = 256
-  const F = 1024
-  dtype store=fp16 accum=fp32
-  input Q : fp16 [SEQ, D]
-  input K : fp16 [SEQ, D]
-  input V : fp16 [SEQ, D]
-  param W1 : fp16 [D, F]
-  param b1 : fp32 [F]
-  param W2 : fp16 [F, D]
-  param b2 : fp32 [D]
-  pipeline out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2)
-```
-
-### 2.7 Semantics: declarations → shapes → IR
-
-The parser only checks *syntax*; `io.fusionc.semantics.GraphBuilder` then performs, in order:
+The parser checks *syntax* only; `io.fusionc.semantics.GraphBuilder` then performs, in order:
 
 1. **Constant table** — duplicates and non-positive values rejected.
 2. **Tensor declarations** — duplicate names rejected; every tensor is 1-D (bias/gain vector)
-   or 2-D (matrix), row-major, contiguous; dimensions resolve through the constant table.
-3. **Numeric policy** — `dtype fp16 store fp32 accum;` sets the default storage and accumulate
-   dtypes; a tensor declaration may override storage (`param b1 : fp32 [F];`). This is the only
-   place precision is declared — the compiler never silently changes it.
-4. **Pipeline expansion** — composite stages are **macros**: `attention(Q,K,V)` expands to
-   `scores = matmul_nt(Q,K)` (with the `1/sqrt(D)` scale folded into the GEMM epilogue),
-   `P = softmax(scores)`, `O = matmul(P,V)`; `MLP(W1, act, W2, b1, b2)` expands to
-   `H = act(matmul(X,W1) + b1)`, `Y = matmul(H,W2) + b2`. So the IR only ever contains
-   primitives (`matmul, matmul_nt, bias, relu, gelu, softmax, add, scale, layernorm`) — the
-   reference workload becomes **15 IR nodes (8 ops + 7 host tensors)**, `residual_block`
-   becomes **20 (10 ops + 10 host tensors)**.
-5. **Shape and dtype inference** — bottom-up, with a hard error on any mismatch: attention head
-   dims must match, `K` and `V` must have the same number of keys, MLP input features must
-   match `W1`, hidden dims must match between `W1`/`W2`, bias sizes must match, matrix inner
-   dims must match, arity is checked (e.g. `MLP` takes 3..5 arguments).
-6. **DAG construction** — nodes carry shape, storage dtype, accumulation dtype, memory
-   placement and dependency edges.
+   or 2-D (matrix), row-major; dimensions resolve through the constant table.
+3. **Numeric policy** — `dtype fp16 store fp32 accum;` sets default storage and accumulate
+   dtypes; a tensor may override storage (`param b1 : fp32 [F];`).
+4. **Pipeline expansion** — composites are macros:
+   `attention(Q,K,V)` → `scores = matmul_nt(Q,K)` (with `1/√D` folded into the epilogue),
+   `softmax`, `matmul(P,V)`; `MLP(W1, act, W2, b1, b2)` → `matmul`, `bias_add`, activation,
+   `matmul`, `bias_add`. The IR only ever contains primitives.
+5. **Shape and dtype inference** — bottom-up, hard error on any mismatch (attention head dims,
+   K/V key counts, MLP feature/hidden dims, bias sizes, matmul inner dims, argument counts).
+6. **DAG construction** — nodes carry shape, storage/accumulate dtype, memory placement and
+   dependency edges.
 
-**Error handling policy: fail loudly.** Unknown/unsupported operations are a hard error that
-lists what *is* supported — verified live:
+**The compiler fails loudly.** Unknown operations list what *is* supported:
 
 ```
 $ java -jar build/fusionc.jar --input examples/unsupported.dsl --fuse -o build/out.cu
@@ -290,79 +257,252 @@ error: unsupported op 'conv2d' -- no emitter exists for it (the compiler refuses
 (exit status 1, no output file written)
 ```
 
-Syntactic errors behave the same way, with position info: `syntax error at line 12, column 8:
-unexpected 'while'`. The parser overrides CUP's `syntax_error`/`unrecovered_syntax_error` to
-throw, so **no partial AST is ever handed to the next stage**.
+Syntactic errors behave the same way, with position info — `syntax error at line 12, column 8:
+unexpected 'while'` — and CUP's `syntax_error` hook throws, so **no partial AST is ever handed
+to the next stage**.
 
-### 2.8 Input and output of a FusionC **program**
+### 4.5 Input and output of a program
 
 | level | syntax | meaning |
 |---|---|---|
-| program inputs | `input Q : fp16 [SEQ, D];` | host-supplied tensor (the generated harness loads `Q.bin`) |
+| program inputs | `input Q : fp16 [SEQ, D];` | host-supplied tensor, loaded from `Q.bin` at run time |
 | program parameters | `param W1 : fp16 [D, F];` | also host-supplied; the distinction is documentation, preserved in the IR |
-| program output | `out = ... ;` | every pipeline binds a result tensor; the last pipeline is the graph output |
+| program output | `out = … ;` | every pipeline binds a result tensor; the last pipeline is the graph output |
 
-At run time the generated harness loads one binary file per `input`/`param` (`NAME.bin`, raw
-little-endian fp16/fp32 in row-major order) and dumps the output tensor — so "input and output"
-is concrete and inspectable, not just conceptual.
-
-### 2.9 Input and output of the **compiler**
-
-| | |
-|---|---|
-| input | one `.dsl` file (`--input file.dsl`) |
-| output | one `.cu` translation unit (`-o file.cu`) |
-| optional outputs | `--ir file.txt` (annotated IR dump) · `--decisions file.json` (every fusion decision) · `--dump-ast` (parse tree to stdout) |
-| stdout | human-readable decision log + one summary line: `emitted out.cu: 3 kernel(s), 15 IR node(s), 4 decision(s)` |
-| exit status | 0 = success, 1 = any front-end/semantic/IO error |
-
-Flags: `--fuse` (default) · `--no-fusion` (baseline: exactly one kernel per op) ·
-`--force-fusion` (ignore profitability guards, keep the hard resource caps — used to measure
-the decisions the heuristics *rejected*) · `--sm-count <n>` (occupancy floor, 6 = GTX 1050 Ti,
-15 = GTX 1070) · `--quiet` · `--help`.
-
-At run time, the generated translation unit is itself a small program with its own I/O:
-
-```
-app.exe --inputs <dir> --out <file.bin> --timings <file.csv> --iters 500 --warmup 100 --device 0
-```
-
-It prints machine-readable lines the driver parses: `DEVICE`, `KERNELATTR` (regs/smem/spills
-from `cudaFuncGetAttributes`), `REGION` (per-kernel-group timing), `TOTAL`, `CHECKSUM`, and
-writes the output tensor to `--out`. `--dump-all <dir>` additionally writes **every**
-materialised intermediate tensor, which is how the debugging tools check per-tensor error.
+Tensors are raw little-endian `fp16`/`fp32`, row-major, one file per tensor.
 
 ---
 
-## 3. Compiler architecture
+## 5. Compiler internals
 
-Pass-by-pass, left to right:
+### 5.1 Front end (lexing + parsing)
 
-| stage | file(s) | job |
+```mermaid
+flowchart LR
+    TEXT["source text"] --> JF["JFlex scanner<br/>Scanner.flex → 63-state DFA"]
+    JF --> TOK["Symbol(type, line, col, value)<br/>one per token"]
+    TOK --> PU["CUP parser<br/>Parser.cup → 56-state LALR(1) tables"]
+    PU --> AST["AST (syntax only)"]
+    PU -.->|"syntax error → throw, exit 1"| X["no partial AST"]
+```
+
+The scanner is generated into `io.fusionc.frontend.Scanner`, the parser into
+`io.fusionc.frontend.parser`; `DslParser` connects them (`new parser(new Scanner(reader))`).
+`--dump-tokens` prints the token stream; `--dump-ast` prints the tree.
+
+### 5.2 Middle end (semantics → IR → fusion)
+
+```mermaid
+flowchart TB
+    AST["AST"] --> GB["GraphBuilder<br/>· declarations · macro expansion<br/>· shape/dtype inference · DAG"]
+    GB --> IR["IR DAG<br/>IrNode: op · shape · store/accum dtype<br/>placement · dependency edges"]
+    IR --> FP["FusionPass<br/>propose groups → price them → decide"]
+    FP --> ACC["FusionGroup[]<br/>(accepted: 1 kernel each)"]
+    FP --> REJ["rejected candidates<br/>logged with a reason"]
+    ACC --> EMIT["back-end emitters"]
+    IR -.->|"--ir"| DUMP["ir.txt"]
+    FP -.->|"--decisions"| DJ["decisions.json"]
+```
+
+### 5.3 The IR graph of the reference workload
+
+`attention_mlp` becomes 15 nodes: 7 host tensors + 8 operations. The three accepted fusion
+groups are the boxes (the rejected GEMM→GEMM candidate is described in §8):
+
+```mermaid
+flowchart LR
+    Q(["Q 64×256<br/>host input"]) --> S
+    K(["K 64×256"]) --> S
+
+    subgraph G0["group 0 · kernel k_attention_fused_0"]
+        direction LR
+        S["matmul_nt → scores<br/>64×64 · stays in registers"] --> X["softmax<br/>64×64"] --> P["matmul P·V<br/>64×256"]
+    end
+
+    V(["V 64×256"]) --> P
+    P --> F1
+    W1(["W1 256×1024"]) --> F1
+
+    subgraph G1["group 1 · kernel k_gemm_epilogue_1"]
+        direction LR
+        F1["matmul fc1<br/>64×1024"] --> B1["bias_add b1"] --> A1["relu"]
+    end
+
+    b1(["b1 1024"]) --> B1
+    A1 --> F2
+    W2(["W2 1024×256"]) --> F2
+
+    subgraph G2["group 2 · kernel k_gemm_epilogue_2"]
+        direction LR
+        F2["matmul fc2<br/>64×256"] --> B2["bias_add b2"]
+    end
+
+    b2(["b2 256"]) --> B2
+    B2 --> OUT(["out 64×256<br/>final result"])
+```
+
+Everything inside a group never touches DRAM (it lives in registers or shared memory); only the
+group boundaries are written to memory. The IR dump (`--ir`) shows exactly this, one row per
+node, with a `group` column and a “(fused, no DRAM buffer)” marker.
+
+### 5.4 Back end (code generation)
+
+`CudaEmitter` walks the groups and picks an emitter by `GroupKind`:
+
+| group kind | emitter | what it writes |
 |---|---|---|
-| lexical analysis | `src/main/jflex/Scanner.flex` → `Scanner.java` | tokens, positions, lexical errors |
-| syntax analysis | `src/main/cup/Parser.cup` → `parser.java`, `sym.java` | LALR(1) tables, AST construction, syntax errors |
-| front-end driver | `src/main/java/io/fusionc/frontend/DslParser.java` | wires scanner→parser→AST |
-| AST | `src/main/java/io/fusionc/ast/Ast.java` | node classes + dump |
-| semantics | `src/main/java/io/fusionc/semantics/GraphBuilder.java` | declarations, macro expansion, shape/dtype inference, DAG |
-| IR | `src/main/java/io/fusionc/ir/*.java` | `IrGraph`, `IrNode`, `OpKind`, `Shape`, `DType`, `MemSpace` |
-| fusion pass | `src/main/java/io/fusionc/pass/*.java` | candidate grouping, cost model (`ResourceModel`), Pascal rules (`PascalHeuristics`), decision log (`FusionDecision`) |
-| back end | `src/main/java/io/fusionc/backend/*.java` | CUDA C emitters: `GemmKernels`, `AttentionKernel`, `MlpKernel`, `ReduceKernels`, `ElementwiseKernels`, `Epilogue`, memory plan + harness (`CudaEmitter`) |
-| CLI | `src/main/java/io/fusionc/Main.java` | flags, orchestration, decision log printing/JSON |
+| `SINGLE` | `GemmKernels`, `ReduceKernels`, `ElementwiseKernels` | one kernel per operation (the `--no-fusion` baseline) |
+| `ELEMENTWISE_FUSED` | `ElementwiseKernels` | a chain of elementwise ops in one kernel |
+| `GEMM_EPILOGUE` | `GemmKernels` + `Epilogue` | matmul whose accumulator tile is consumed in registers by bias/activation |
+| `ATTENTION_FUSED` | `AttentionKernel` | QKᵀ → softmax → PV, one kernel, K/V staged in shared memory |
+| `GEMM_GEMM_FUSED` | `MlpKernel` | MLP where the hidden tile is produced into shared memory and consumed in place |
 
-The **fusion pass** is the middle end. It walks the DAG and proposes three kinds of groups:
+Then the emitter writes the **static memory plan** (one allocation per tensor, shared-memory
+stage buffers overlaid so they are recycled) and the **host harness** (loads `.bin` inputs,
+warms up, times every region with CUDA events, prints `KERNELATTR`/`REGION`/`TOTAL`/`CHECKSUM`
+lines, dumps the output tensor).
 
-| kind | merges | idea |
+---
+
+## 6. Data structures
+
+### 6.1 AST (`io.fusionc.ast.Ast`) — syntax only
+
+| class | fields | notes |
 |---|---|---|
-| `attention_fused` | scores + softmax + PV | reduction-free chain; keeps the score tile out of DRAM |
-| `gemm_epilogue` | matmul + bias/activation | the bias/act consumes the accumulator tile **straight out of registers** |
-| `gemm_gemm_fused` | matmul + act + matmul | the hidden tile stays in **shared memory** instead of round-tripping through DRAM |
+| `Program` | `List<Decl> decls`, `List<Pipeline> pipelines` | declarations precede statements |
+| `ConstDecl` | `name`, `value` | `const SEQ = 64;` |
+| `DtypeDecl` | `store`, `accum` | numeric policy |
+| `TensorDecl` | `name`, `dtype`, `dims:List<Expr>`, `input` | `input`/`param` |
+| `Pipeline` | `output`, `stages:List<Stage>` | one statement |
+| `Stage` | `Name(name)` or `Call(op, args:List<Expr>)` | a pipeline step |
+| `Expr` | `IntLit(value)` / `FloatLit(value)` / `Ref(name)` | dims and arguments |
 
-Each candidate is priced by `ResourceModel`: ~48 KB/block shared memory, 255 regs/thread,
-2 blocks/SM occupancy floor, grid size, DRAM bytes saved, launches removed. `PascalHeuristics`
-holds every tunable as a named constant with a comment explaining the Pascal fact behind it
-(the tile-size chooser, the accumulator-register floor, the 64-key attention band, ...).
-Every candidate ends in a logged decision, e.g. (real text from the reference workload):
+### 6.2 IR (`io.fusionc.ir`) — everything the compiler knows
+
+| field (class) | type | meaning |
+|---|---|---|
+| `IrNode.id`, `.name`, `.op` | int, String, `OpKind` | identity |
+| `IrNode.inputs`, `.consumers` | `List<IrNode>` | the DAG edges (producers / consumers) |
+| `IrNode.shape` | `Shape(rows, cols)` | row-major 2-D shape |
+| `IrNode.store`, `.accum` | `DType` (`FP16`/`FP32`) | memory dtype vs arithmetic dtype |
+| `IrNode.placement` | `MemSpace` (`GLOBAL`/`SHARED`/`REGISTER`) | where the value lives during the kernel |
+| `IrNode.materialized` | boolean | false ⇒ the value never gets a DRAM buffer (fused away) |
+| `IrNode.group` | int | fusion-group id, `-1` = standalone |
+| `IrNode.attrs` | map | `transB`, `scale`, `hostTensor`, `pipeline`, `origin` |
+| `IrGraph.nodes / byName / outputs / namedOutputs` | lists/maps | nodes are in topological creation order |
+
+`OpKind` (the primitives, composites are already expanded):
+
+| op | kind | meaning |
+|---|---|---|
+| `INPUT`, `PARAM` | leaf | host-supplied tensors |
+| `MATMUL` | reduction | `A·B` (attr `transB` selects `A·Bᵀ`) |
+| `SOFTMAX`, `LAYERNORM` | reduction | row-wise over the last dimension |
+| `BIAS_ADD`, `RELU`, `GELU`, `SCALE`, `ADD` | elementwise | epilogue-friendly ops |
+
+### 6.3 Fusion structures (`io.fusionc.pass`)
+
+| class | fields | meaning |
+|---|---|---|
+| `FusionGroup` | `id`, `kind:GroupKind`, `members`, `external`, `internal`, `params`, `decision` | one scheduled kernel; `external` = written to DRAM, `internal` = stays inside |
+| `FusionDecision` | `groupId`, `kind`, `accepted`, `members`, `predicted{smemBytes, regsPerThread, occupancyMilli, gridBlocks, …}`, `metrics{bytesSaved, launchesSaved}`, `gridBlocks`, `bytesSaved`, `reason` | the JSON-logged record of one accept/reject |
+| `ResourceModel.Est` | `threads`, `smemBytes`, `regsPerThread`, `gridBlocks`, `occupancy` | the cost model's prediction (same numbers ptxas later reports) |
+
+### 6.4 Every tunable in one file (`PascalHeuristics`) — the anti-magic-number rule
+
+No compiler constant exists outside this class, and each carries the Pascal fact that justifies
+it. The main ones:
+
+| constant | value | why |
+|---|---|---|
+| `MAX_SMEM_BYTES_PER_BLOCK` | 48 KB | sm_61 static shared-memory limit (no opt-in) |
+| `SMEM_BYTES_PER_SM` | 96 KB | unified L1/shared per SM |
+| `MAX_REGS_PER_THREAD` / `REGS_PER_SM` | 255 / 65 536 | architecture limits |
+| `MAX_THREADS_PER_BLOCK` / `_PER_SM` | 1024 / 2048 | occupancy bounds |
+| `WARP_SIZE`, `SMEM_BANK_BYTES` | 32, 4 B | shuffle width, bank conflicts |
+| `FP16_MATH_RATE_DIVISOR` | 64 | GP10x FP16 math runs at 1/64 FP32 rate — hence storage-only halves |
+| `GEMM_BM/BN/BK`, `GEMM_TILES` | 64×64, then 64×32 → 32×64 → 32×32 | tile chooser steps down while the grid is too small |
+| `GEMM_TILE_MIN_BLOCKS` | 4 | below this the kernel cannot fill a 16-SM part |
+| `ATTN_DIM_CHUNK`, `ATTN_ROWS_PER_BLOCK` | 64, 2 | shared-memory budget of the fused attention kernel |
+| `MLP_RM/CN/BK/HF` | 32 / 64 / 32 / 128 | fused MLP tile (34 KB shared memory) |
+| `SMEM_SAFETY_MARGIN`, `REG_SAFETY_MARGIN` | 0.90 | fuse only while predicting ≤90% of the caps |
+| `MIN_PREDICTED_OCCUPANCY` | 0.25 | occupancy floor (overridable by big traffic savings) |
+| `OCCUPANCY_OVERRIDE_SAVING_BYTES` | 512 KB | the override threshold |
+| `MIN_GLOBAL_BYTES_SAVED` | 8 KB | below this, fusing is not worth any register cost |
+| `MIN_GRID_BLOCKS_PER_SM` | 2 | fused kernels must still fill the device |
+| `MAX_PRODUCER_REREAD_AMPLIFICATION` | 1.0 | a fusion that re-streams weights more often than the baseline loses |
+| `MAX_EPILOGUE_CHAIN` | 4 | limit on chained elementwise epilogues |
+| `REG_BASE_OVERHEAD`, `LAUNCH_COST_US` | 32, 4.0 | register overhead; per-launch cost for decision logging |
+
+---
+
+## 7. The generated CUDA C
+
+One self-contained translation unit per build. Its structure, top to bottom
+(example: `results/attention_mlp/attention_mlp_fused.cu`):
+
+1. **header comment** — source name, mode, target, the Pascal constraints baked in;
+2. **device helpers** — warp shuffles (`fx_warp_max/sum`, block reductions), GELU, fp16
+   helpers, `FX_CUDA_CHECK`;
+3. **the kernels**, one per fusion group, each preceded by a comment stating its tiling and
+   shared-memory budget:
+
+   ```c
+   // kernel 0: attention_fused -- QK^T*scale -> softmax -> PV, one kernel
+   //   64 query rows x 256 head dim; 2 rows/block (1 warp each), 4 dimension chunks of 64
+   //   shared per stage: K 4224 halves (padded) overlaid with V 4096 floats, x2 stages
+   typedef union { __half h[4224]; float f[4096]; } fx_stage0_t;
+   __global__ void k_attention_fused_0(__half* __restrict__ T_out_attn_pv,
+                                       const __half* __restrict__ P_Q, ...) { ... }
+   ```
+
+4. **the static memory plan** — one allocation per tensor, shared-memory stage unions overlaid
+   so buffers are recycled between phases;
+5. **the host harness** — loads `.bin` inputs, runs warm-up + timed iterations, times every
+   region with CUDA events, prints machine-readable lines and dumps the output tensor.
+
+Compile and run it exactly as the report does:
+
+```
+nvcc -arch=sm_61 -O3 -Xptxas -v results/attention_mlp/attention_mlp_fused.cu -o attn_fused.exe
+```
+
+Design constraints visible in every kernel: FP16 **storage** with FP32 **accumulation**; no
+`cp.async` (cooperative global→shared copies + `__syncthreads()`; the fused attention kernel
+issues the next chunk's loads *before* the current chunk's FMAs — the Pascal stand-in for an
+async copy); warp-level reductions so row reductions never touch DRAM; padded shared memory so
+strided attention reads do not bank-conflict.
+
+---
+
+## 8. The fusion decision
+
+This is the heart of the project: the compiler proposes fusions, prices them, and either takes
+them or rejects them **with a written reason**. Nothing is heuristic guesswork that goes
+unrecorded.
+
+```mermaid
+flowchart TB
+    C["candidate: producer → consumer chain<br/>(or attention chain, or GEMM → act → GEMM)"] --> P
+    P["ResourceModel predicts:<br/>shared memory · registers · threads · grid · occupancy"] --> CAPS
+    CAPS{"within hardware caps?<br/>smem ≤ 90% of 48 KB<br/>regs ≤ 90% of 255"}
+    CAPS -- "no" --> R["REJECT — reason logged"]
+    CAPS -- "yes" --> GRID{"grid ≥ 2 blocks per SM?"}
+    GRID -- "no" --> R
+    GRID -- "yes" --> OCC{"predicted occupancy ≥ 0.25<br/>(or saves ≥ 512 KB)"}
+    OCC -- "no" --> R
+    OCC -- "yes" --> PROF{"profitable?<br/>≥ 8 KB DRAM saved<br/>weight re-read amplification ≤ 1.0"}
+    PROF -- "no" --> R
+    PROF -- "yes" --> EMIT{"emitter exists for this shape?<br/>(attention ≤ 64 keys/row,<br/>≥ 4 accumulators per thread)"}
+    EMIT -- "no" --> R
+    EMIT -- "yes" --> A["ACCEPT — fuse<br/>values stay in registers/shared memory"]
+    A --> L["decision JSON + reason"]
+    R --> L
+    R -.->|"--force-fusion still builds it,<br/>so the rejection can be measured"| M["verdict column in REPORT.md"]
+```
+
+Real example from the reference workload — the rejected GEMM→GEMM fusion:
 
 ```
 REJECT gemm_gemm_fused   out.mlp_fc1 + out.mlp_b1 + out.mlp_act + out.mlp_fc2
@@ -373,418 +513,455 @@ REJECT gemm_gemm_fused   out.mlp_fc1 + out.mlp_b1 + out.mlp_act + out.mlp_fc2
                   for the lost parallelism)
 ```
 
----
-
-## 4. What the compiler generates
-
-One **self-contained translation unit** per build (`results/attention_mlp/attention_mlp_fused.cu`
-is a checked-in example). Its structure:
-
-1. header comment: source name, mode, target, the Pascal constraints baked in;
-2. device helpers: warp shuffles (`fx_warp_max/sum`, block reductions), GELU, fp16 load/store
-   helpers, `FX_CUDA_CHECK`;
-3. the generated kernels (one per fusion region):
-   `k_attention_fused_0`, `k_gemm_epilogue_1`, `k_gemm_epilogue_2` for the fused reference
-   workload — each with a comment stating its tiling, staging and shared-memory budget;
-4. a **static memory plan**: one allocation per tensor, shared-memory stage unions overlaid so
-   buffers are recycled between phases;
-5. a **host harness**: loads `.bin` inputs, warms up, times every region with CUDA events,
-   prints `KERNELATTR` lines from `cudaFuncGetAttributes` (so ptxas predictions can be
-   cross-checked against the driver), verifies no launch error, dumps the output.
-
-Compile and run it yourself with what the report uses:
-
-```
-nvcc -arch=sm_61 -O3 -Xptxas -v results/attention_mlp/attention_mlp_fused.cu -o attn_fused.exe
-```
-
-Design constraints reflected in every emitted kernel: FP16 **storage** with FP32
-**accumulation**; no `cp.async` (cooperative global→shared copies + `__syncthreads()`, and in
-the fused attention kernel the next chunk's loads are issued *before* the current chunk's FMAs
-— the Pascal stand-in for an async copy); warp-level reductions so row reductions never touch
-DRAM; padded shared-memory layout so the strided attention reads do not bank-conflict.
+…and the measurement that proves the rejection was right: when that same fusion is forced into
+the build anyway (`--force-fusion`), it runs **51.6%–188% slower** than the unfused kernels it
+would have replaced (§9.4). The evaluations rejections are not assumptions.
 
 ---
 
-## 5. Build from source
+## 9. Evaluation pipeline and measured results
 
-```powershell
-.\scripts\build.ps1
+### 9.1 How a measurement happens
+
+```mermaid
+sequenceDiagram
+    participant D as driver/fusionc_driver.py
+    participant N as numpy (float64 oracle)
+    participant C as fusionc.jar
+    participant V as nvcc 11.8
+    participant G as generated harness (GPU)
+
+    D->>D: read the DSL (same single source of truth)
+    D->>N: generate seeded inputs, compute reference output
+    loop fused · no-fusion · forced
+        D->>C: emit .cu + IR + decision log
+        D->>V: nvcc -arch=sm_61 -O3 -Xptxas -v
+        V-->>D: register / shared-memory / spill stats
+        D->>G: run 500 timed iterations (CUDA events)
+        G-->>D: per-region ms + output tensor + checksum
+        D->>D: compare with the oracle, score the decision
+    end
+    D->>D: write docs/REPORT.md + results/results.json
 ```
 
-The script runs the four build steps:
+### 9.2 The four metrics
 
-1. **JFlex** `src/main/jflex/Scanner.flex` → `build/generated/io/fusionc/frontend/Scanner.java`
-   (needs `tools/jflex.jar` + the CUP runtime because of `%cup` mode),
-2. **CUP** `src/main/cup/Parser.cup` → `parser.java` + `sym.java` (the upstream jar ships no
-   `Main-Class`, so `java_cup.Main` is invoked explicitly),
-3. **javac** all sources → `build/classes`,
-4. **jar** `build/fusionc.jar` with the CUP runtime bundled.
+| # | metric | how it is obtained |
+|---|---|---|
+| 1 | correctness | element-wise vs a float64 numpy oracle, and (for the reference workload) vs an independent hand-written CUDA implementation |
+| 2 | resource stats | `ptxas -v` per kernel: registers, shared memory, spills — cross-checked against `cudaFuncGetAttributes` at run time |
+| 3 | runtime | CUDA events around every region, 500 timed iterations after 100 warm-up |
+| 4 | decision quality | every fused region vs the sum of the unfused kernels it replaced; > +5% improved, < −5% degraded; rejected candidates measured with `--force-fusion` |
 
-Requirements: JDK 11+ on PATH (or `JAVA_HOME`). The jars already live in `tools/`:
-`jflex.jar` (1.9.1), `java-cup.jar` (0.11b), `java-cup-runtime.jar` (11b). A built
-`build/fusionc.jar` is already present in this folder.
+### 9.3 Results (GTX 1070, 16 SMs, sm_61 — 500 timed iterations)
 
----
-
-## 6. Live demo: how to prove it works
-
-A short, scriptable demo for the viva. Every command below has been run on this machine.
-
-**Step 1 — compile the DSL (the default is the fused back end):**
-
-```powershell
-java -jar build/fusionc.jar --input examples/attention_mlp.dsl --fuse -o build/attn_fused.cu
-```
-
-Expected: the decision log on stdout — three FUSED regions and one REJECT, each with predicted
-resources and a reason — and the summary line
-`emitted build\attn_fused.cu: 3 kernel(s), 15 IR node(s), 4 decision(s)`.
-
-**Step 2 — show the parse tree (statements + expressions):**
-
-```powershell
-java -jar build/fusionc.jar --input examples/attention_mlp.dsl --dump-ast --quiet -o build/attn.cu
-```
-
-Prints the `Program ... pipeline out = attention(Q, K, V) -> MLP(...)` dump from §2.6.
-
-**Step 3 — show the IR and the decision log as files:**
-
-```powershell
-java -jar build/fusionc.jar --input examples/attention_mlp.dsl --fuse `
-     --ir build/attn.ir.txt --decisions build/attn.decisions.json -o build/attn_fused.cu
-python tools/show_decisions.py build/attn.decisions.json     # pretty-print the decisions
-```
-
-**Step 4 — the baseline for comparison (one kernel per op):**
-
-```powershell
-java -jar build/fusionc.jar --input examples/attention_mlp.dsl --no-fusion -o build/attn_unfused.cu
-```
-
-Expected: `... 8 kernel(s), 15 IR node(s), 0 decision(s)`.
-
-**Step 5 — demonstrate failing loudly (negative test):**
-
-```powershell
-java -jar build/fusionc.jar --input examples/unsupported.dsl --fuse -o build/out.cu
-echo $LASTEXITCODE   # -> 1
-```
-
-Expected message quoted in §2.7; no output file is created.
-
-**Step 6 — regenerate the measurement report** (full GPU evaluation; builds, compiles with
-nvcc, runs, validates, writes `docs/REPORT.md` + `results/results.json`, and prints
-`[PASS] all 10 variants compiled, ran and matched the fp64 oracle`):
-
-```powershell
-python driver/fusionc_driver.py
-# or a single workload:
-python driver/fusionc_driver.py --workload attention_mlp --iters 300
-# or rebuild the report from the stored results without touching the GPU:
-python driver/fusionc_driver.py --from-results
-```
-
-The driver returns exit status 1 if anything failed to compile, crashed, or disagreed with the
-oracle — so "it works" is a machine-checked claim, not a screenshot.
-
-**Step 7 — open the evidence:** `docs/REPORT.md` (the four metrics, in tables),
-`results/results.json` (every raw number), `results/<workload>/` (generated `.cu`, `ptxas -v`
-log, decision JSON, IR dump, timings CSV, output tensors), and `docs/DSL_SPEC.md` (the language
-reference).
-
----
-
-## 7. Evaluation: the four metrics
-
-Full tables live in [`docs/REPORT.md`](docs/REPORT.md); this is the summary as measured on
-this machine (GTX 1070, 16 SMs, sm_61; 500 timed iterations, 100 warm-up; seed 20261025).
-
-### 7.1 Correctness
-
-Every variant is compared **element-wise** against a float64 numpy oracle of the same graph fed
-the identical FP16 inputs, with acceptance `|a-b| <= 0.02 + 0.02*|b|` (looser than the ~1e-3
-accumulated error, deliberately):
-
-* all **10 compiled variants PASS** — fused, unfused, forced-fusion, and the hand-written
-  reference, on all three workloads;
-* strongest evidence: generated `--no-fusion` output vs the **independent hand-written CUDA
-  reference** on the reference workload is **bit-identical** (`max abs 0.0`), and both match
-  the oracle;
-* observed error (~3e-4 .. 2e-3) is the FP16 quantisation floor, not an algorithmic difference —
-  all accumulation happens in FP32 registers, as the numeric policy demands.
-
-### 7.2 `ptxas -v` statistics
-
-* **Zero spills everywhere**: every kernel reports 0 bytes stack, 0 spill stores, 0 spill
-  loads (and the harness's `KERNELATTR` lines, read from `cudaFuncGetAttributes` at run time,
-  agree).
-* Shared memory peaks at **34,304 B** in the fused attention kernel — 71% of the 48 KB sm_61
-  limit, leaving room for 2 resident blocks/SM.
-* Every fused kernel's predicted footprint in the decision log **matches the ptxas
-  measurement**, because the cost model and the emitters read the same constants.
-
-### 7.3 Runtime (CUDA events, mean per iteration)
-
-| workload | fused | unfused | speedup |
+| workload | fused | no-fusion | speedup |
 |---|---|---|---|
-| `attention_mlp` (64 tokens) | 0.2138 ms | 0.2490 ms | **1.16x** |
-| `mlp_wide_batch` (512 tokens) | 0.5562 ms | 0.5920 ms | **1.06x** |
-| `residual_block` (LN + GELU MLP) | 0.1874 ms | 0.2440 ms | **1.30x** |
+| `attention_mlp` (64 tokens) | 0.2138 ms | 0.2490 ms | **1.16×** |
+| `mlp_wide_batch` (512 tokens) | 0.5562 ms | 0.5920 ms | **1.06×** |
+| `residual_block` (LN + attention + residual + GELU MLP) | 0.1874 ms | 0.2440 ms | **1.30×** |
 
-For scale: the hand-written reference on `attention_mlp` runs 0.1594 ms — included as an
-independent correctness check first, and as a performance datapoint second; the generated
-`--no-fusion` output matches it bit-for-bit but is slower (the reference uses a different,
-better-fitting tiling for these small shapes). Closing that gap (split-K, double buffering) is
-in [§9](#9-known-limitations-and-future-work).
+Correctness: **all 10 compiled variants PASS** element-wise against the fp64 oracle
+(acceptance `|a−b| ≤ 0.02 + 0.02·|b|`; observed error ~3e-4 … 2e-3, the fp16 quantisation
+floor). The generated `--no-fusion` output is **bit-identical** to the hand-written reference
+(max abs 0.0). Resource stats: **zero spills everywhere**; shared memory peaks at 34.3 KB in
+the fused attention kernel (71% of the 48 KB cap).
 
-### 7.4 Fusion decision quality
-
-Each fused region is compared against the sum of the unfused kernels it replaced, measured in
-the same session; > +5% is *improved*, < −5% is *degraded*.
+### 9.4 Decision quality — including the rejections
 
 | workload | region | fused ms | unfused sum ms | verdict |
 |---|---|---|---|---|
-| attention_mlp | `attention_fused#0` | 0.0726 | 0.0960 | **improved** (+24.4%) |
-| attention_mlp | `gemm_epilogue#1` | 0.0662 | 0.0824 | **improved** (+19.7%) |
+| attention_mlp | `attention_fused#0` | 0.0726 | 0.0960 | improved (+24.4%) |
+| attention_mlp | `gemm_epilogue#1` | 0.0662 | 0.0824 | improved (+19.7%) |
 | attention_mlp | `gemm_epilogue#2` | 0.1940 | 0.1715 | degraded (−13.1%) |
 | mlp_wide_batch | `gemm_epilogue#0` | 0.1707 | 0.1650 | neutral (−3.5%) |
 | mlp_wide_batch | `gemm_epilogue#1` | 0.1804 | 0.1718 | degraded (−5.0%) |
-| residual_block | `attention_fused#0` | 0.0348 | 0.0832 | **improved** (+58.1%) |
-| residual_block | `gemm_epilogue#1` | 0.0463 | 0.0670 | **improved** (+30.9%) |
-| residual_block | `gemm_epilogue#2` | 0.1254 | 0.1419 | **improved** (+11.6%) |
+| residual_block | `attention_fused#0` | 0.0348 | 0.0832 | improved (+58.1%) |
+| residual_block | `gemm_epilogue#1` | 0.0463 | 0.0670 | improved (+30.9%) |
+| residual_block | `gemm_epilogue#2` | 0.1254 | 0.1419 | improved (+11.6%) |
 
-**And the rejections were validated by measurement.** Every rejected candidate is rebuilt with
-`--force-fusion` and timed anyway; all forced `gemm_gemm_fused` builds are clearly *slower*
-than the unfused kernels they would have replaced:
+Rejected `gemm_gemm_fused` candidates, compiled anyway with `--force-fusion`:
 
-| workload | forced region | forced ms | unfused sum ms | verdict |
-|---|---|---|---|---|
-| attention_mlp | `gemm_gemm_fused#1` | 0.3849 | 0.2539 | degraded (−51.6%) |
-| mlp_wide_batch | `gemm_gemm_fused#0` | 0.9700 | 0.3367 | degraded (−188.0%) |
-| residual_block | `gemm_gemm_fused#1` | 0.5400 | 0.2088 | degraded (−158.6%) |
+| workload | forced ms | unfused sum ms | verdict |
+|---|---|---|---|
+| attention_mlp | 0.3849 | 0.2539 | degraded (−51.6%) |
+| mlp_wide_batch | 0.9700 | 0.3367 | degraded (−188.0%) |
+| residual_block | 0.5400 | 0.2088 | degraded (−158.6%) |
 
-So the rejections are correct calls, not conservative guesses — and the two small-tile
-GEMM-epilogue fusions that do measure slightly negative are reported as measured: the verdict
-column exists precisely so the report cannot quietly claim more than the data shows. (The
-analysis section of the report explains the 64-token shapes: launch overhead dominates at that
-size, and a 64×256 output tile is 1,024 threads of work — it cannot fill a 16-SM GPU at all.)
+The small-tile epilogue fusions that measure slightly negative are reported as measured — the
+verdict column exists precisely so the report cannot quietly claim more than the data shows.
+Why the gains are modest at these sizes: the 64-token workloads are launch-overhead bound
+(Windows/WDDM), and one GEMM (`fc2`) dominates the total; §16 explains what would move next.
 
-### 7.5 Heuristic sensitivity to the SM count
+### 9.5 Heuristic sensitivity to the SM count
 
-The occupancy floor (2 blocks/SM) is the one heuristic input that depends on the target part;
-`--sm-count 6` (GTX 1050 Ti) vs `15` (GTX 1070) is reported for every workload. Same DSL,
-same compiler, different target — the decision log shows where the SM count changes a verdict.
+The occupancy floor depends on the target part, so the driver reports every workload at
+`--sm-count 6` (GTX 1050 Ti, the brief) and `15` (the GTX 1070 used here). Same DSL, same
+compiler — the decision log shows where (and whether) the SM count changes a verdict.
 
 ---
 
-## 8. Pascal-specific design decisions
+## 10. The web dashboard
 
-* **FP16 storage, FP32 accumulate.** GP10x runs FP16 arithmetic at 1/64 of the FP32 rate, so
-  halves are used for *bandwidth* only; every FMA happens in FP32 registers. Enforced by the
-  numeric policy, and by promoting reduction inputs (softmax logits) to FP32 storage.
-* **No `cp.async`.** Every staged tile is a cooperative `global → shared` copy followed by
-  `__syncthreads()`. Where it matters (fused attention), the next chunk's loads are issued
-  *before* the current chunk's FMAs and published with a single barrier per chunk — the Pascal
-  stand-in for an async copy.
-* **48 KB / 255 registers.** Fused kernels are rejected, with a logged reason, when the
-  predicted shared memory or register footprint exceeds the caps, or when the predicted
-  occupancy and grid size fall below the occupancy floor. Rejections are decisions too.
-* **Warp-level reductions** (`__shfl_down_sync`) for softmax/LayerNorm/attention, so row
-  reductions never touch DRAM.
-* **Shared-memory bank behaviour.** Attention K rows are padded by two halves so the strided
-  key access lands on distinct banks; the V stage is FP32 so the PV reads are conflict-free;
-  the K buffer is recycled for V between phases to halve the footprint.
-* **GEMM tile chosen per shape.** A 64x64 tile is best when the problem can fill the device,
-  but a 64-row GEMM tiled 64x64 runs as a *single block* on a 16-SM part, so the tile chooser
-  steps down (64x64 → 64x32 → 32x64 → 32x32) while the grid cannot reach
-  `GEMM_TILE_MIN_BLOCKS`. Stepping down further measured slower, so it stops there.
-* **All thresholds are named constants** in `io.fusionc.pass.PascalHeuristics`, each with a
-  comment explaining the Pascal fact behind the number.
+A React front end (`app/`) with a Flask API (`app/server.py`) that runs the real toolchain and
+shows every pipeline stage as it completes — written so that someone who has never heard of
+CUDA can follow along.
+
+```powershell
+.\scripts\start_demo.ps1          # Flask on :5000, Vite on :5173
+# then open http://localhost:5173
+```
+
+```mermaid
+sequenceDiagram
+    participant B as browser (React)
+    participant F as Flask (app/server.py)
+    participant J as fusionc.jar
+    participant G as nvcc + GPU harness
+
+    B->>F: POST /api/run {workload, iters}
+    F-->>B: {job_id}
+    loop poll every ~1 s while running
+        B->>F: GET /api/jobs/{id}?since=N
+        F-->>B: 9 stages + new log lines
+    end
+    F->>J: emit .cu (+ IR, + decisions)
+    F->>G: compile + run both builds, compare with the oracle
+    B->>F: GET /api/artifact/{workload}/{file}
+    F-->>B: generated CUDA C / IR / decision log (viewers)
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> running
+    running --> done
+    running --> failed
+    done --> [*]
+    failed --> [*]
+```
+
+The nine stages the UI walks through, in plain language:
+
+| # | stage | what it shows |
+|---|---|---|
+| 1 | read the program | the DSL source + every input tensor (role, dtype, shape) |
+| 2 | lexing | the actual token stream, with line/column |
+| 3 | parsing | the actual syntax tree |
+| 4 | understanding the maths | the operation graph: nodes, ops, memory placement |
+| 5 | the optimisation decision | every FUSED/REJECT card with its reason; “8 kernels → 3 kernels” |
+| 6 | writing GPU code | both generated `.cu` files, viewable in a modal |
+| 7 | building for the card | nvcc + ptxas per kernel |
+| 8 | running on the GPU | per-piece timings for both builds |
+| 9 | checking the answer | GPU output vs the float64 reference, value by value |
+
+…ending in **the race**: fused vs naive totals, the speedup and per-region bars for the run you
+just triggered. A second card shows the recorded 500-iteration evaluation from
+`results/results.json` so live numbers can be compared against the report.
 
 ---
 
-## 9. Known limitations and future work
+## 11. Repository specification
 
-* **No split-K.** Shallow-M GEMMs (64 rows) cannot fill the device with the current tiling. A
-  split-K variant with a reduction pass would fix exactly the dominant kernel (`fc2`) in the
-  reference workload.
-* **Single-buffered GEMM tiles.** GEMM tile loads are issued, then awaited by
-  `__syncthreads()`; only the fused attention kernel hides load latency. Register-staged double
-  buffering would cost shared memory the 48 KB budget does not have at 64x64 tiles.
-* **Attention is single-band.** The fused attention kernel handles up to 64 keys per row
-  without online-softmax rescaling; the 512-token workload is correctly *rejected* (with a
-  logged reason) and falls back to three unfused kernels. Multi-band attention with rescaling
-  is the natural extension.
-* **Launch overhead dominates the 64-token workload.** Its cost is mostly per-kernel launch
-  overhead (tens of microseconds per launch on Windows/WDDM), and each timed region also pays
-  for its own CUDA-event pair — both effects favour fewer kernels. The forced-fusion column
-  isolates kernel *efficiency* from launch count.
-* **Measurement noise.** WDDM: totals move roughly ±10% between runs, kernel-level ratios are
-  stable. Verdicts are therefore computed inside a single session, back to back.
-* **FP16 arithmetic is deliberately unused** (1/64 rate on GP10x). On GP100 (1/2 rate) the
-  same IR would want a different policy; the policy is a compile-time declaration, not a
-  hard-coded assumption.
+```
+compilerproject/
+│
+├── README.md                       ← this document
+├── .gitignore
+│
+├── src/main/                       ← COMPILER SOURCE
+│   ├── jflex/Scanner.flex          ← lexer specification (JFlex, %cup mode)
+│   ├── cup/Parser.cup              ← grammar + semantic actions (CUP, LALR(1))
+│   └── java/io/fusionc/
+│       ├── Main.java               ← CLI: parse → IR → fusion → emit; flags, JSON log
+│       ├── FrontendException.java  ← the one error type (fail loudly)
+│       ├── frontend/DslParser.java ← wires scanner + parser together
+│       ├── ast/Ast.java            ← AST node classes + dump (§6.1)
+│       ├── semantics/GraphBuilder.java  ← declarations, macros, shapes, DAG (§5.2)
+│       ├── ir/                     ← IR DATA STRUCTURES (§6.2)
+│       │   ├── IrNode.java  IrGraph.java  OpKind.java
+│       │   └── Shape.java   DType.java    MemSpace.java
+│       ├── pass/                   ← MIDDLE END: the optimisation (§8)
+│       │   ├── FusionPass.java     ← proposes groups, prices them, decides
+│       │   ├── FusionGroup.java    ← one scheduled kernel (members, params)
+│       │   ├── FusionDecision.java ← the logged record (predicted, metrics, reason)
+│       │   ├── GroupKind.java      ← the five kernel shapes
+│       │   ├── ResourceModel.java  ← analytic cost model (§6.3)
+│       │   └── PascalHeuristics.java ← EVERY tunable, named + justified (§6.4)
+│       └── backend/                ← CODE GENERATION (§5.4, §7)
+│           ├── CudaEmitter.java    ← orchestrates the whole .cu
+│           ├── EmitContext.java    ← per-group emit state (regs, smem, names)
+│           ├── CudaWriter.java     ← source formatting
+│           ├── AttentionKernel.java  GemmKernels.java  MlpKernel.java
+│           ├── ReduceKernels.java    ElementwiseKernels.java
+│           └── Epilogue.java         LaunchConfig.java
+│
+├── driver/fusionc_driver.py        ← EVALUATION (§9): build, nvcc, run, compare, report
+├── scripts/
+│   ├── build.ps1                   ← JFlex + CUP + javac + jar
+│   └── start_demo.ps1              ← starts Flask + Vite for the dashboard
+│
+├── app/                            ← WEB DASHBOARD (§10)
+│   ├── server.py                   ← Flask API: jobs, stages, artifacts, recorded data
+│   ├── src/App.jsx                 ← the whole UI (9 stages, race card, viewers)
+│   ├── src/App.css, src/index.css  ← styling
+│   ├── index.html                  ← page shell
+│   ├── vite.config.js              ← dev server + /api proxy → Flask
+│   └── package.json                ← react + vite only (no chart libraries)
+│
+├── examples/                       ← INPUTS to the compiler
+│   ├── attention_mlp.dsl           ← reference workload (64 tokens)
+│   ├── mlp_wide_batch.dsl          ← 512 tokens (wide-batch case)
+│   ├── residual_block.dsl          ← LayerNorm + attention + residual + GELU MLP
+│   └── unsupported.dsl             ← negative test: must fail loudly
+│
+├── reference/reference_unfused.cu  ← independent hand-written baseline (§9.2)
+│
+├── results/                        ← EVIDENCE: everything a run produced
+│   ├── results.json                ← machine-readable totals of the evaluation
+│   └── <workload>/                 ← per workload:
+│       ├── <name>_{fused,unfused,fused_forced}.cu        generated CUDA C
+│       ├── ....ir.txt / .decisions.json / .nvcc.log      IR, decision log, ptxas
+│       ├── ....timings.csv / .out.bin                    timings, output tensor
+│       └── inputs/*.bin                                  the exact inputs used
+│
+├── tools/                          ← helper scripts + build jars
+│   ├── jflex.jar · java-cup.jar · java-cup-runtime.jar   (build inputs)
+│   ├── device_probe.cu             ← asks the GPU for its real limits
+│   ├── live_demo.py                ← interactive terminal demo (fused vs naive)
+│   ├── isolate.py                  ← per-tensor error against the oracle
+│   ├── bisect_launch.py            ← first faulting launch in a broken build
+│   ├── dbg_kernel.py · nan_probe.py
+│   └── show_decisions.py · show_kernel.py · show_named_kernel.py · show_results.py
+│
+├── docs/
+│   ├── DSL_SPEC.md                 ← language reference
+│   ├── REPORT.md                   ← generated measurement report (the four metrics)
+│   └── analysis.md                 ← narrative analysis (folded into REPORT.md)
+│
+└── build/                          ← GENERATED, git-ignored
+    ├── fusionc.jar                 ← the compiler (built by scripts/build.ps1)
+    ├── generated/io/fusionc/frontend/{Scanner,parser,sym}.java
+    ├── classes/                    ← compiled .class files
+    └── demo/<workload>/            ← artifacts produced by dashboard runs
+```
 
 ---
 
-## 10. Repository layout
+## 12. File formats
 
-| path | what |
+**Token dump** (`--dump-tokens`) — one line per token, then the count:
+
+```
+  1  line  5 col  1  CONST
+  2  line  5 col  7  IDENT      SEQ
+  3  line  5 col 11  EQ
+  4  line  5 col 13  INT        64
+...
+(111 tokens)
+```
+
+**AST dump** (`--dump-ast`) — the tree, outermost first:
+
+```
+Program
+  const SEQ = 64
+  dtype store=fp16 accum=fp32
+  input Q : fp16 [SEQ, D]
+  pipeline out = attention(Q, K, V) -> MLP(W1, relu, W2, b1, b2)
+```
+
+**IR dump** (`--ir file.txt`) — one row per node:
+
+```
+id   name                   op         shape     store/acc   placement  group  inputs -> consumers
+7    out.attn_scores        MATMUL     64x64     float/float REGISTER   0      Q,K -> out.attn_softmax (fused, no DRAM buffer)
+14   out.mlp_b2             BIAS_ADD   64x256    half/float  GLOBAL     2      out.mlp_fc2,b2 -> (dead)
+```
+
+**Decision log** (`--decisions file.json`):
+
+| field | meaning |
 |---|---|
-| `src/main/jflex/Scanner.flex` | JFlex lexer spec (`%cup` mode, returns `java_cup.runtime.Symbol`) |
-| `src/main/cup/Parser.cup` | CUP LALR grammar (produces `parser.java` + `sym.java`) |
-| `src/main/java/io/fusionc/frontend` | front-end driver (JFlex scanner + CUP parser) |
-| `src/main/java/io/fusionc/ast` | AST node classes |
-| `src/main/java/io/fusionc/semantics` | declaration processing, macro expansion, shape/dtype inference, DAG build |
-| `src/main/java/io/fusionc/ir` | IR: op kind, shape, storage/accumulate dtype, memory placement, dependency edges |
-| `src/main/java/io/fusionc/pass` | fusion pass, Pascal heuristics (all tunables), resource cost model, decision log |
-| `src/main/java/io/fusionc/backend` | CUDA C emitters: per-op kernels, fused kernels, memory plan, host harness |
-| `reference/reference_unfused.cu` | independent hand-written unfused implementation (correctness + perf datapoint) |
-| `driver/fusionc_driver.py` | parse → fuse → emit → `nvcc -arch=sm_61` → run → collect metrics → report |
-| `examples/*.dsl` | workloads: reference graph, wide batch, residual block, negative test |
-| `docs/DSL_SPEC.md` | language reference |
-| `docs/REPORT.md` | generated measurement report (correctness, ptxas stats, runtime, verdicts) |
-| `docs/analysis.md` | narrative analysis, folded into the generated report |
-| `results/` | per-workload artifacts: generated `.cu`, `ptxas -v` logs, decision JSON, IR dumps, timing CSVs, output tensors |
-| `tools/` | `device_probe.cu` (device limits), `isolate.py` (per-tensor error vs the oracle), `bisect_launch.py` (first faulting launch), `show_decisions.py`, `show_kernel.py`, `show_named_kernel.py`, `show_results.py`, + the JFlex/CUP jars |
-| `scripts/build.ps1` | JFlex + CUP + javac + jar |
-| `build/` | generated sources, classes, `fusionc.jar`, device probe |
-| `CyberScript/` | separate earlier lexer/parser exercise (see [Appendix A](#appendix-a-the-cyberscript-folder)) |
+| `source`, `mode`, `target`, `smCount`, `irNodes` | run metadata |
+| `regions[]` | the kernels actually built: `region` label, `kernel` name, `kind`, `members` |
+| `decisions[]` | every candidate: `group`, `kind`, `accepted`, `members`, `predicted{…}`, `metrics{…}`, `gridBlocks`, `bytesSaved`, `reason` |
 
-`results/<workload>/` keeps every generated `.cu`, its nvcc log with `ptxas -v` output, the
-decision JSON and the raw output tensors, so any number in the report can be traced back to the
-artifact that produced it.
-
-Debugging tools for a miscompile:
+**Timings CSV** (written by the generated harness, one row per region):
 
 ```
-python tools/isolate.py <workload> fused     # per-tensor error of every materialised tensor
-python tools/bisect_launch.py <file.cu>      # sync after each launch, prints the first faulting one
-python tools/show_decisions.py <json>        # fusion decisions with predicted resources and reasons
-python tools/show_kernel.py <file.cu>        # print one generated kernel
+region,ms_per_iter
+"out.attn_scores",0.068504
+"out.mlp_fc2",0.166734
+"TOTAL",0.249000
 ```
+
+**Harness stdout protocol** (parsed by the driver; also visible in the dashboard log):
+
+| line | format | meaning |
+|---|---|---|
+| `DEVICE` | `DEVICE,<name>,<cc>,<smCount>` | which GPU was used |
+| `KERNELATTR` | `KERNELATTR,<kernel>,<regs>,<smem>,<spills>` | run-time `cudaFuncGetAttributes` (cross-check vs ptxas) |
+| `REGION` | `REGION,<label>,<ms>` | mean ms per iteration for one region |
+| `TOTAL` | `TOTAL,<ms>` | the whole pipeline |
+| `CHECKSUM` | `CHECKSUM,<float>` | sum of the output tensor (quick sanity fingerprint) |
+| `OUTPUT` | `OUTPUT,<tensor>,<elements>,<esize>` | the dumped output tensor |
+
+**Inputs/outputs on disk** — raw little-endian `fp16` (2 B) or `fp32` (4 B) elements, row-major,
+no header; `<name>.bin` per tensor.
 
 ---
 
-## 11. Viva cheat sheet
+## 13. Command reference
 
-**"What have you built, in one sentence?"**
-A source-to-source compiler: it takes a small tensor-pipeline DSL and emits self-contained CUDA C
-for Pascal GPUs, fusing producer-consumer operations under a resource cost model whose every
-decision is logged, and validated by measuring the rejected candidates too.
+**Compiler (`java -jar build/fusionc.jar`):**
 
-**"What are the statements of your language?"**
+| flag | meaning |
+|---|---|
+| `--input <file.dsl>` | DSL source (required) |
+| `--fuse` / `--no-fusion` | fused back end (default) or one-kernel-per-op baseline |
+| `-o <file.cu>` | write the generated CUDA C here (required) |
+| `--decisions <file.json>` | write the fusion decision log |
+| `--ir <file.txt>` | write the annotated IR dump |
+| `--sm-count <n>` | SM count for occupancy heuristics (6 = GTX 1050 Ti, 15 = GTX 1070) |
+| `--force-fusion` | ignore profitability guards (hardware caps still enforced) — the measurement tool for rejections |
+| `--dump-tokens` / `--dump-ast` | print the token stream / the syntax tree |
+| `--quiet` | suppress the human-readable decision log on stdout |
+
+**Evaluation driver (`python driver/fusionc_driver.py`):**
+
+| flag | meaning |
+|---|---|
+| `--workload <name>` | one workload, comma-separated, or `all` (default) |
+| `--iters` / `--warmup` | timed iterations (default 200) / warm-up (default 50) |
+| `--sm-count <n>` | override the heuristic SM count (default: probed from the GPU) |
+| `--skip-build` / `--skip-reference` | skip rebuilding the jar / the hand-written comparison |
+| `--from-results` | rebuild the report from an existing `results.json` (no GPU work) |
+
+Exit status is 0 only if **everything** compiled, ran and matched the oracle — “it works” is
+machine-checked, not a screenshot.
+
+**Demos:** `python tools/live_demo.py [workload] [-i N]` (terminal), and
+`.\scripts\start_demo.ps1` (browser dashboard, §10).
+
+---
+
+## 14. Viva cheat sheet
+
+**“What have you built, in one sentence?”**
+A source-to-source compiler: it reads a small tensor-pipeline language and emits self-contained
+CUDA C for Pascal GPUs, fusing producer-consumer operations under a resource cost model whose
+every decision is logged — and validated by measuring the rejected candidates too.
+
+**“What are the statements of your language?”**
 Exactly one kind: the pipeline binding `name = stage -> stage -> ... ;`, plus the declarations
 (`const`, `dtype`, `input`/`param`) that must all precede statements. Rules:
 `stmt ::= IDENT EQ stage_list SEMI`, `stage_list ::= stage_list ARROW stage | stage`,
-`stage ::= IDENT LPAREN arglist RPAREN | IDENT`. `->` chains left-associatively (left-recursive
-rule), feeds each stage's result into the next stage as its first argument, and each bound name
-becomes a tensor that later pipelines can consume.
+`stage ::= IDENT LPAREN arglist RPAREN | IDENT`. `->` chains left-associatively, feeds each
+stage's result into the next as its first argument, and every bound name becomes a tensor later
+pipelines can consume.
 
-**"What are the expression rules?"**
-`expr ::= INT | FLOAT | IDENT | LPAREN expr RPAREN`, with comma-separated `expr_list`s used in
-two places: tensor dimensions (`[SEQ, D]`) and op arguments (`attention(Q, K, V)`). No infix
-operators → no precedence; parentheses are grouping only. Identifiers resolve semantically: a
-constant in a dimension, a tensor (or `relu`/`gelu` in the activation slot) in an argument list.
+**“What are the expression rules?”**
+`expr ::= INT | FLOAT | IDENT | LPAREN expr RPAREN`, with comma-separated lists in two places:
+tensor dimensions (`[SEQ, D]`) and op arguments (`attention(Q, K, V)`). No infix operators ⇒ no
+precedence; parentheses are grouping only. In `dims`, an identifier must be a constant; in
+`arglist`, a tensor — or `relu`/`gelu` in the activation slot.
 
-**"Why does your expression grammar have no precedence?"**
-By design — the language describes a dataflow graph, not arithmetic. Computation is named
-operations in pipelines; precision is a `dtype` declaration. The only chaining operator is `->`
-at statement level, left-associative by the left-recursive `stage_list` rule. (If asked for a
-richer one: the older `CyberScript` grammar in the repo has `PLUS/MINUS` and `MULT/DIV` with
-`precedence left` declarations — Appendix A.)
-
-**"How does input and output work?"**
-Three levels. *In the language*: `input`/`param` declare host tensors, every pipeline binds an
-output, the last one is the graph result. *For the compiler*: `.dsl` in, `.cu` out, plus
+**“How does input and output work?”**
+Three levels. *In the language*: `input`/`param` declare host tensors; every pipeline binds an
+output; the last one is the graph result. *For the compiler*: `.dsl` in, `.cu` out, plus
 optional IR dump and decision JSON; exit status 1 on any error. *At run time*: the generated
 harness loads one `.bin` per tensor, times every region with CUDA events, prints
-`KERNELATTR`/`REGION`/`TOTAL`/`CHECKSUM` lines, writes the output tensor, and can dump every
-intermediate tensor with `--dump-all`.
+`KERNELATTR`/`REGION`/`TOTAL`/`CHECKSUM`, and dumps the output tensor (`--dump-all` writes every
+intermediate too).
 
-**"Walk me through `out = attention(Q,K,V) -> MLP(...);`"**
+**“Walk me through `out = attention(Q,K,V) -> MLP(...);`”**
 JFlex tokenises → CUP parses it as `Pipeline("out", [Call("attention",[Q,K,V]),
-Call("MLP",[W1, relu, W2, b1, b2])])` → semantics expands the two macros into 8 primitive ops
-with shape/dtype inference (15 IR nodes) → the fusion pass accepts `attention_fused` (scores +
-softmax + PV into one kernel) and the two `gemm_epilogue` fusions, rejects `gemm_gemm_fused`
-with a reason → the back end emits 3 kernels + memory plan + harness; with `--no-fusion` it is
-8 kernels instead.
+Call("MLP",[W1, relu, W2, b1, b2])])` → semantics expands the macros into 8 primitive ops with
+shape/dtype inference (15 IR nodes) → the fusion pass accepts `attention_fused` and the two
+`gemm_epilogue` fusions and rejects `gemm_gemm_fused` with a reason → the back end emits
+3 kernels + memory plan + harness; with `--no-fusion` it is 8 kernels instead.
 
-**"What errors does it catch?"**
+**“What errors does it catch?”**
 Illegal characters; syntax errors with line/column (no partial AST — the parser throws);
 duplicate constants/tensors; non-positive constants; unknown constant/tensor; non-integer or
-wrong-rank dimensions; unsupported ops (with the supported list); shape mismatches everywhere
-(attention head dims, K/V key counts, MLP feature/hidden dims, bias sizes, matmul inner dims);
-wrong argument counts; unsupported activations. All of them: hard error, exit 1, no output
-file — fail loudly, never guess.
+wrong-rank dimensions; unsupported ops (the message lists what *is* supported); shape mismatches
+everywhere; wrong argument counts; unsupported activations. Always: hard error, exit 1, no
+output file.
 
-**"How do you know the generated CUDA is correct?"**
-Three independent checks: (1) every variant vs a float64 numpy oracle of the same graph fed
-identical FP16 inputs, element-wise — all 10 variants PASS; (2) generated `--no-fusion` vs an
-independently hand-written CUDA reference — bit-identical (max abs 0.0); (3) per-tensor
-`isolate.py` against the oracle for every materialised intermediate. Plus the driver exits
-non-zero if *anything* fails, so the PASS is machine-checked.
+**“How do you know the generated CUDA is correct?”**
+Three independent checks: every variant vs a float64 numpy oracle (all 10 PASS); generated
+`--no-fusion` vs an independently hand-written CUDA reference — bit-identical (max abs 0.0);
+per-tensor `isolate.py` against the oracle. Plus the driver exits non-zero if anything fails.
 
-**"Fusion sounds great — why reject anything?"**
-Because fusing costs resources: a fused kernel with too small a row tile re-streams both weight
-matrices, and a tile that leaves fewer than 4 accumulators per thread is shared-memory-bound.
-The heuristics reject `gemm_gemm_fused` at these shapes — and we prove the rejection was right
-by compiling it anyway with `--force-fusion`: it is 51.6% / 188% / 158.6% slower than the
-unfused kernels. Rejections are validated, not assumed.
+**“Fusion sounds great — why reject anything?”**
+Fusing costs resources: a fused kernel with too small a row tile re-streams the weight matrices,
+and a tile that leaves fewer than 4 accumulators per thread is shared-memory-bound. The
+heuristics reject GEMM→GEMM at these shapes — and the rejection is proven right by compiling it
+anyway (`--force-fusion`): 51.6% / 188% / 158.6% slower than the unfused kernels.
 
-**"What is `--sm-count` for?"**
-The occupancy floor is 2 blocks/SM, so the target's SM count participates in the decision:
-6 (GTX 1050 Ti, the brief) vs 15 (GTX 1070, this machine). The report prints the decision log
-for both settings.
+**“Why JFlex and CUP?”**
+The course toolchain, and a good fit: JFlex `%cup` mode makes the scanner speak
+`java_cup.runtime.Scanner` directly; CUP builds an LALR(1) parser with error hooks that are
+overridden to fail loudly; both are generated from specs in `src/main/` at build time.
 
-**"Why JFlex and CUP?"**
-They are the course toolchain, and they fit: JFlex `%cup` mode makes the scanner speak
-`java_cup.runtime.Scanner` directly; CUP gives an LALR(1) parser with error hooks we override
-to fail loudly; both are generated at build time from the specs in `src/main/`.
-
-**"What is the biggest limitation?"**
-The dominant kernel in the 64-token workload (the `fc2` GEMM, 1,024 threads of work) cannot
-fill a 16-SM GPU at this size — no tiling fixes that; split-K would. And attention is
-single-band (≤64 keys/row) by design, with multi-band online softmax as the natural extension.
+**“What is `--sm-count` for?”**
+The occupancy floor is a blocks-per-SM rule, so the target's SM count participates in the
+decision: 6 (GTX 1050 Ti, the brief) vs 15 (this GTX 1070). The report prints the decision log
+for both.
 
 ---
 
-## Appendix A: the `CyberScript/` folder
+## 15. Pascal-specific design decisions
 
-`CyberScript/` is a **separate, earlier lexer/parser exercise** — not part of the CUDA
-compiler pipeline — written in the same JFlex/CUP stack. It defines a little network-security
-scripting language:
+* **FP16 storage, FP32 accumulate.** GP10x run FP16 arithmetic at 1/64 of the FP32 rate, so
+  halves are used for *bandwidth* only; every FMA happens in FP32 registers. Enforced by the
+  numeric policy, and by promoting reduction inputs (softmax logits) to FP32 storage.
+* **No `cp.async`.** Every staged tile is a cooperative `global → shared` copy followed by
+  `__syncthreads()`; the fused attention kernel issues the next chunk's loads before the current
+  chunk's FMAs and publishes with one barrier per chunk.
+* **48 KB / 255 registers.** Fused kernels are rejected, with a logged reason, when the
+  predicted footprint exceeds the caps or the grid/occupancy floors — rejections are decisions
+  too.
+* **Warp-level reductions** (`__shfl_down_sync`) for softmax/LayerNorm/attention.
+* **Shared-memory bank behaviour**: attention K rows padded by two halves; the V stage is FP32;
+  the K buffer is recycled for V between phases.
+* **GEMM tile chosen per shape**: 64×64 steps down to 64×32 → 32×64 → 32×32 only while the grid
+  cannot reach 4 blocks; stepping further measured slower.
+* **All thresholds are named constants** in `PascalHeuristics` with the hardware fact behind
+  them (§6.4).
 
-* **Statements**: `NETWORK id`, `DEVICE id`, `SET id = expr`, `SCAN id | SCAN PORT n`,
-  `ALERT "msg" | ALERT ADMIN`, `LOG "msg"`, `BLOCK SOURCE`, `REPORT`, and the block
-  `IF condition stmt_list END` with conditions `PORT n OPEN|CLOSED`,
-  `ATTACK DDOS|BRUTEFORCE|PORTSCAN DETECTED`, or `expr relop expr`.
-* **Expressions**: `expr ::= expr PLUS|MINUS|MULT|DIV expr | (expr) | ID | NUMBER | TRAFFIC`
-  with real operator precedence declared in the CUP file
-  (`precedence left PLUS, MINUS;` then `precedence left MULT, DIV;` — so `MULT/DIV` binds
-  tighter, and both are left-associative), plus relational operators `> < >= <= == !=`.
-* `Cup/` contains the full pipeline (`lexer.jflex`, `parser.cup`, `Main.java`, sample
-  `test.cys`); `Standalone/` is a `%standalone` lexer-only demo that prints one line per
-  recognised token, with multi-line comments and explicit unterminated-string/comment errors,
-  driven by `input.txt`.
-* It validates and prints (`Syntax valid`, `IF statement parsed`, ...) — it has no semantics or
-  code generation; that is what the main compiler adds.
+---
 
-Known inconsistency, worth fixing before anyone runs it: `Cup/test.cys` says `IF PORT OPEN`
-but the grammar requires a port number (`PORT NUMBER OPEN`), so that sample would be rejected
-as written; `Standalone/input.txt` is the consistent full sample.
+## 16. Limitations and future work
 
-## Appendix B: toolchain notes (this machine)
+* **No split-K.** Shallow-M GEMMs (64 rows) cannot fill the device with the current tiling; the
+  dominant `fc2` kernel in the reference workload would be the prime beneficiary.
+* **Single-buffered GEMM tiles** — only the fused attention kernel hides load latency;
+  register-staged double buffering would cost shared memory the 48 KB budget does not have.
+* **Attention is single-band** (≤ 64 keys/row without online-softmax rescaling); the 512-token
+  workload is correctly rejected with a logged reason. Multi-band attention is the natural
+  extension.
+* **Launch overhead dominates 64-token shapes** on Windows/WDDM; fusion wins there largely by
+  removing launches (and each timed region also pays for its own CUDA-event pair). The
+  forced-fusion column isolates kernel *efficiency* from launch count.
+* **Measurement noise** (±10% on totals between runs on WDDM), so verdicts are computed inside
+  a single session, back to back.
+* **FP16 arithmetic deliberately unused** — on GP100 (1/2 rate) the same IR would want a
+  different numeric policy, which is a compile-time declaration, not a hard-coded assumption.
+
+---
+
+## Appendix A — toolchain notes
 
 * **CUDA 11.8 is required**: CUDA 13 removed `sm_61` code generation entirely, and `nvprof`
   only exists in the 11.x line.
 * nvcc 11.8 cannot host-compile with the VS 18 / MSVC 14.51 STL (`STL1002: Unexpected compiler
   version`), so the driver pins the host toolset to `vcvars64.bat -vcvars_ver=14.34` — the
   newest toolset CUDA 11.8 supports.
-* The evaluation machine has a **GTX 1070** (same `sm_61` ISA, 15/16 SMs instead of the brief's
-  6-SM GTX 1050 Ti), so the driver reports both SM settings and the report shows where the SM
-  count changes a fusion decision.
-* Measured environment: OpenJDK 21, nvcc 11.8 (`-arch=sm_61 -O3 -Xptxas -v`), MSVC 14.34,
-  Windows SDK 10.0.22621, 500 timed iterations / 100 warm-up, seed 20261025.
+* This machine: **GTX 1070** (same `sm_61` ISA, 15/16 SMs instead of the brief's 6-SM
+  GTX 1050 Ti), OpenJDK 21, nvcc 11.8 (`-arch=sm_61 -O3 -Xptxas -v`), MSVC 14.34, Windows SDK
+  10.0.22621, 500 timed iterations / 100 warm-up, seed 20261025.
+* `results/<workload>/` keeps every generated `.cu`, its nvcc log with `ptxas -v` output, the
+  decision JSON and the raw output tensors, so every number in the report can be traced back to
+  the artifact that produced it.
