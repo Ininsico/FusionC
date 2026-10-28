@@ -1,0 +1,21 @@
+{
+  "source": "residual_block.dsl",
+  "mode": "no-fusion",
+  "target": "sm_61",
+  "smCount": 16,
+  "irNodes": 20,
+  "regions": [
+    { "region": "norm.layernorm", "kernel": "k_norm_layernorm", "kind": "single", "members": ["norm.layernorm"] },
+    { "region": "att.attn_scores", "kernel": "k_att_attn_scores", "kind": "single", "members": ["att.attn_scores"] },
+    { "region": "att.attn_softmax", "kernel": "k_att_attn_softmax", "kind": "single", "members": ["att.attn_softmax"] },
+    { "region": "att.attn_pv", "kernel": "k_att_attn_pv", "kind": "single", "members": ["att.attn_pv"] },
+    { "region": "res.add", "kernel": "k_res_add", "kind": "single", "members": ["res.add"] },
+    { "region": "out.mlp_fc1", "kernel": "k_out_mlp_fc1", "kind": "single", "members": ["out.mlp_fc1"] },
+    { "region": "out.mlp_b1", "kernel": "k_out_mlp_b1", "kind": "single", "members": ["out.mlp_b1"] },
+    { "region": "out.mlp_act", "kernel": "k_out_mlp_act", "kind": "single", "members": ["out.mlp_act"] },
+    { "region": "out.mlp_fc2", "kernel": "k_out_mlp_fc2", "kind": "single", "members": ["out.mlp_fc2"] },
+    { "region": "out.mlp_b2", "kernel": "k_out_mlp_b2", "kind": "single", "members": ["out.mlp_b2"] }
+  ],
+  "decisions": [
+  ]
+}

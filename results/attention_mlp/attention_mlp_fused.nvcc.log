@@ -1,0 +1,16 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z17k_gemm_epilogue_2P6__halfPKS_S2_PKf' for 'sm_61'
+ptxas info    : Function properties for _Z17k_gemm_epilogue_2P6__halfPKS_S2_PKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, 8192 bytes smem, 352 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z17k_gemm_epilogue_1P6__halfPKS_S2_PKf' for 'sm_61'
+ptxas info    : Function properties for _Z17k_gemm_epilogue_1P6__halfPKS_S2_PKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, 8192 bytes smem, 352 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z19k_attention_fused_0P6__halfPKS_S2_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z19k_attention_fused_0P6__halfPKS_S2_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 43 registers, 34304 bytes smem, 352 bytes cmem[0], 28 bytes cmem[2]
+attention_mlp_fused.cu
+   Creating library C:\Users\Administrator\Desktop\compilerproject\results\attention_mlp\attention_mlp_fused.lib and object C:\Users\Administrator\Desktop\compilerproject\results\attention_mlp\attention_mlp_fused.exp
+

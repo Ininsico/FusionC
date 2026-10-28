@@ -1,0 +1,37 @@
+{
+  "source": "mlp_wide_batch.dsl",
+  "mode": "fuse",
+  "target": "sm_61",
+  "smCount": 16,
+  "irNodes": 15,
+  "regions": [
+    { "region": "gemm_gemm_fused#0", "kernel": "k_gemm_gemm_fused_0", "kind": "gemm_gemm_fused", "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2", "out.mlp_b2"] },
+    { "region": "out.attn_scores", "kernel": "k_out_attn_scores", "kind": "single", "members": ["out.attn_scores"] },
+    { "region": "out.attn_softmax", "kernel": "k_out_attn_softmax", "kind": "single", "members": ["out.attn_softmax"] },
+    { "region": "out.attn_pv", "kernel": "k_out_attn_pv", "kind": "single", "members": ["out.attn_pv"] }
+  ],
+  "decisions": [
+  {
+    "group": -1,
+    "kind": "attention_fused",
+    "accepted": false,
+    "members": ["out.attn_scores", "out.attn_softmax", "out.attn_pv"],
+    "predicted": {},
+    "metrics": {},
+    "gridBlocks": 0,
+    "bytesSaved": 2097152,
+    "reason": "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels."
+  },
+  {
+    "group": 0,
+    "kind": "gemm_gemm_fused",
+    "accepted": true,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2", "out.mlp_b2"],
+    "predicted": { "smemBytes": 34816, "regsPerThread": 64, "occupancyMilli": 250, "gridBlocks": 64, "tileRM": 32, "tileCN": 64, "hiddenChunk": 128 },
+    "metrics": { "bytesSaved": 4194304.0000, "launchesSaved": 1.0000 },
+    "gridBlocks": 64,
+    "bytesSaved": 4194304,
+    "reason": "GEMM->activation->GEMM (512x1024 x 1024x256, hidden 1024) fused: the [512x1024] hidden tile stays in shared memory instead of round-tripping through DRAM (4096.0 KB saved) and the second kernel launch disappears; tile 32x64 hidden-chunk 128, smem=34.0KB regs=64 threads=256 grid=64 occupancy=0.25; 64 blocks >= 32 floor"
+  }
+  ]
+}

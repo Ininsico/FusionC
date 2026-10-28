@@ -1,0 +1,6 @@
+region,ms_per_iter
+"gemm_gemm_fused#0",0.969962
+"out.attn_scores",0.149717
+"out.attn_softmax",0.018540
+"out.attn_pv",0.106041
+"TOTAL",1.157052

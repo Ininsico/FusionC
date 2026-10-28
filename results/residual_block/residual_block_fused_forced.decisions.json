@@ -1,0 +1,37 @@
+{
+  "source": "residual_block.dsl",
+  "mode": "fuse",
+  "target": "sm_61",
+  "smCount": 16,
+  "irNodes": 20,
+  "regions": [
+    { "region": "attention_fused#0", "kernel": "k_attention_fused_0", "kind": "attention_fused", "members": ["att.attn_scores", "att.attn_softmax", "att.attn_pv"] },
+    { "region": "gemm_gemm_fused#1", "kernel": "k_gemm_gemm_fused_1", "kind": "gemm_gemm_fused", "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2", "out.mlp_b2"] },
+    { "region": "norm.layernorm", "kernel": "k_norm_layernorm", "kind": "single", "members": ["norm.layernorm"] },
+    { "region": "res.add", "kernel": "k_res_add", "kind": "single", "members": ["res.add"] }
+  ],
+  "decisions": [
+  {
+    "group": 0,
+    "kind": "attention_fused",
+    "accepted": true,
+    "members": ["att.attn_scores", "att.attn_softmax", "att.attn_pv"],
+    "predicted": { "smemBytes": 38912, "regsPerThread": 26, "occupancyMilli": 250, "gridBlocks": 8, "rowsPerBlock": 8, "dimChunk": 64 },
+    "metrics": { "bytesSaved": 32768.0000, "launchesSaved": 2.0000 },
+    "gridBlocks": 8,
+    "bytesSaved": 32768,
+    "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=38.0KB regs=26 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor (2/SM x 16 SMs); 8 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+  },
+  {
+    "group": 1,
+    "kind": "gemm_gemm_fused",
+    "accepted": true,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2", "out.mlp_b2"],
+    "predicted": { "smemBytes": 34816, "regsPerThread": 64, "occupancyMilli": 250, "gridBlocks": 8, "tileRM": 32, "tileCN": 64, "hiddenChunk": 128 },
+    "metrics": { "bytesSaved": 524288.0000, "launchesSaved": 1.0000 },
+    "gridBlocks": 8,
+    "bytesSaved": 524288,
+    "reason": "GEMM->activation->GEMM (64x1024 x 1024x256, hidden 1024) fused: the [64x1024] hidden tile stays in shared memory instead of round-tripping through DRAM (512.0 KB saved) and the second kernel launch disappears; tile 32x64 hidden-chunk 128, smem=34.0KB regs=64 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor"
+  }
+  ]
+}

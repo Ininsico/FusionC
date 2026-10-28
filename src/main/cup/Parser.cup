@@ -1,0 +1,129 @@
+/* Parser.cup -- CUP grammar for the FusionC tensor-pipeline DSL.
+ *
+ * Run:  java -cp tools/java-cup.jar java_cup.Main -package io.fusionc.frontend \
+ *           -parser parser -symbols sym -destdir build/generated/io/fusionc/frontend \
+ *           src/main/cup/Parser.cup
+ *
+ * CUP produces sym.java (token constants) and parser.java (LALR tables).
+ * The scanner is the JFlex-generated io.fusionc.frontend.Scanner, which implements
+ * java_cup.runtime.Scanner and returns java_cup.runtime.Symbol objects.
+ *
+ * NOTE ON ORDER: CUP's meta-grammar requires the code sections (parser code, scan with)
+ * to appear BEFORE the symbol declarations, and "start with" after them. Reordering them
+ * makes CUP report "Illegal use of reserved word".
+ */
+package io.fusionc.frontend;
+
+import io.fusionc.ast.Ast;
+import java.util.ArrayList;
+import java.util.List;
+
+parser code {:
+    /** Any syntax error is fatal: no partial AST is ever handed to the compiler. */
+    @Override
+    public void syntax_error(java_cup.runtime.Symbol tok) {
+        throw new io.fusionc.FrontendException(describe(tok));
+    }
+
+    @Override
+    public void unrecovered_syntax_error(java_cup.runtime.Symbol tok) {
+        throw new io.fusionc.FrontendException(describe(tok));
+    }
+
+    private String describe(java_cup.runtime.Symbol tok) {
+        if (tok == null || tok.sym == sym.EOF) {
+            return "unexpected end of file";
+        }
+        String text = tok.value != null ? tok.value.toString() : sym.terminalNames[tok.sym];
+        return "syntax error at line " + (tok.left + 1) + ", column " + (tok.right + 1)
+             + ": unexpected '" + text + "'";
+    }
+:};
+
+scan with {: return ((java_cup.runtime.Scanner) getScanner()).next_token(); :};
+
+/* ------------------------------ terminals ------------------------------ */
+terminal Long    INT;
+terminal Double  FLOAT;
+terminal String  IDENT;
+terminal CONST, DTYPE, STORE, ACCUM, INPUT, PARAM, FP16, FP32;
+terminal SEMI, COMMA, COLON, EQ, ARROW, LPAREN, RPAREN, LBRACKET, RBRACKET;
+
+/* ---------------------------- non terminals ---------------------------- */
+non terminal Ast.Program            program;
+non terminal List<Ast.Decl>         decl_list;
+non terminal Ast.Decl               decl;
+non terminal String                 datatype;
+non terminal List<Ast.Expr>         dims, expr_list;
+non terminal Ast.Expr               expr;
+non terminal List<Ast.Pipeline>     stmt_list;
+non terminal Ast.Pipeline           stmt;
+non terminal List<Ast.Stage>        stage_list;
+non terminal Ast.Stage              stage;
+non terminal List<Ast.Expr>         arglist;
+
+start with program;
+
+/* ------------------------------- grammar ------------------------------- */
+program ::= decl_list:dl stmt_list:sl
+        {: RESULT = new Ast.Program(dl, sl); :}
+        ;
+
+decl_list ::= decl_list:l decl:d
+        {: l.add(d); RESULT = l; :}
+        | /* empty */
+        {: RESULT = new ArrayList<Ast.Decl>(); :}
+        ;
+
+decl ::= CONST IDENT:name EQ INT:value SEMI
+        {: RESULT = new Ast.ConstDecl(name, ((Long) value).longValue(), 0); :}
+       | DTYPE datatype:store STORE datatype:accum ACCUM SEMI
+        {: RESULT = new Ast.DtypeDecl(store, accum); :}
+       | INPUT IDENT:name COLON datatype:dt dims:d SEMI
+        {: RESULT = Ast.TensorDecl.host(name, dt, d, true); :}
+       | PARAM IDENT:name COLON datatype:dt dims:d SEMI
+        {: RESULT = Ast.TensorDecl.host(name, dt, d, false); :}
+       ;
+
+datatype ::= FP16 {: RESULT = "fp16"; :}
+           | FP32 {: RESULT = "fp32"; :}
+           ;
+
+dims ::= LBRACKET expr_list:l RBRACKET {: RESULT = l; :}
+       ;
+
+expr_list ::= expr_list:l COMMA expr:e {: l.add(e); RESULT = l; :}
+            | expr:e                   {: RESULT = new ArrayList<Ast.Expr>(); RESULT.add(e); :}
+            ;
+
+expr ::= INT:i      {: RESULT = new Ast.IntLit(((Long) i).longValue()); :}
+       | FLOAT:f    {: RESULT = new Ast.FloatLit((Double) f); :}
+       | IDENT:n    {: RESULT = new Ast.Ref(n); :}
+       | LPAREN expr:e RPAREN {: RESULT = e; :}
+       ;
+
+stmt_list ::= stmt_list:l stmt:s
+        {: l.add(s); RESULT = l; :}
+        | /* empty */
+        {: RESULT = new ArrayList<Ast.Pipeline>(); :}
+        ;
+
+stmt ::= IDENT:out EQ stage_list:sl SEMI
+        {: RESULT = new Ast.Pipeline(out, sl, 0); :}
+        ;
+
+stage_list ::= stage_list:l ARROW stage:s
+        {: l.add(s); RESULT = l; :}
+        | stage:s
+        {: RESULT = new ArrayList<Ast.Stage>(); RESULT.add(s); :}
+        ;
+
+stage ::= IDENT:name LPAREN arglist:a RPAREN
+        {: RESULT = new Ast.Call(name, a, 0, 0); :}
+        | IDENT:name
+        {: RESULT = new Ast.Name(name); :}
+        ;
+
+arglist ::= expr_list:l {: RESULT = l; :}
+          | /* empty */  {: RESULT = new ArrayList<Ast.Expr>(); :}
+          ;

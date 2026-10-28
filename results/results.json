@@ -1,0 +1,2430 @@
+{
+  "environment": {
+    "java": "openjdk version \"21.0.12.1\" 2026-08-18 LTS",
+    "nvcc": "Cuda compilation tools, release 11.8, V11.8.89",
+    "host toolset": "MSVC 14.34.31933 (pinned via VCToolsVersion)",
+    "windows sdk": "10.0.22621.0",
+    "gpu": "NVIDIA GeForce GTX 1070, 582.66, 8192 MiB",
+    "device limits": "16 SMs, 49152 B smem/block, 98304 B smem/SM, 65536 regs/SM, 2048 threads/SM, 1645 MHz",
+    "nvcc flags": "-arch=sm_61 -O3 -Xptxas -v",
+    "sm count given to heuristics": "16",
+    "iterations": "500 timed, 100 warm-up",
+    "seed": "20261025",
+    "projects root": "C:\\Users\\Administrator\\Desktop\\compilerproject"
+  },
+  "workloads": [
+    {
+      "workload": "attention_mlp",
+      "dsl": "examples/attention_mlp.dsl",
+      "question": "reference workload: fused attention + fused MLP vs 8 unfused kernels",
+      "consts": {
+        "SEQ": 64,
+        "D": 256,
+        "F": 1024
+      },
+      "tensors": {
+        "Q": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "K": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "V": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "W1": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "fp16"
+        },
+        "b1": {
+          "shape": [
+            1024
+          ],
+          "dtype": "fp32"
+        },
+        "W2": {
+          "shape": [
+            1024,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "b2": {
+          "shape": [
+            256
+          ],
+          "dtype": "fp32"
+        }
+      },
+      "variants": {
+        "fused": {
+          "cu": "results\\attention_mlp\\attention_mlp_fused.cu",
+          "compiled": true,
+          "decisions_json": "results\\attention_mlp\\attention_mlp_fused.decisions.json",
+          "ir": "results\\attention_mlp\\attention_mlp_fused.ir.txt",
+          "total_ms": 0.213803,
+          "regions": {
+            "attention_fused#0": 0.072601,
+            "gemm_epilogue#1": 0.066205,
+            "gemm_epilogue#2": 0.193967
+          },
+          "ptxas": {
+            "k_gemm_epilogue_2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_gemm_epilogue_1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_attention_fused_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 43,
+              "smem": 34304
+            }
+          },
+          "kernel_attrs": {
+            "k_attention_fused_0": {
+              "regs": 43,
+              "smem": 34304,
+              "spills": 0
+            },
+            "k_gemm_epilogue_1": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_gemm_epilogue_2": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v attention_mlp_fused.cu -o attention_mlp_fused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\attention_mlp\\attention_mlp_fused.cu: 3 kernel(s), 15 IR node(s), 4 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0003156038565026442,
+            "mean_abs": 4.520759785633233e-05,
+            "max_rel": 2.0964016205865006,
+            "ok": true,
+            "worst_violation": -0.019899486574483122
+          },
+          "checksum": 242.485593796,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "attention_mlp.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "attention_fused#0",
+                "kernel": "k_attention_fused_0",
+                "kind": "attention_fused",
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ]
+              },
+              {
+                "region": "gemm_epilogue#1",
+                "kernel": "k_gemm_epilogue_1",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "gemm_epilogue#2",
+                "kernel": "k_gemm_epilogue_2",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": 0,
+                "kind": "attention_fused",
+                "accepted": true,
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ],
+                "predicted": {
+                  "smemBytes": 34304,
+                  "regsPerThread": 26,
+                  "occupancyMilli": 63,
+                  "gridBlocks": 32,
+                  "rowsPerBlock": 2,
+                  "dimChunk": 64
+                },
+                "metrics": {
+                  "bytesSaved": 32768.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 32,
+                "bytesSaved": 32768,
+                "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=33.5KB regs=26 threads=64 grid=32 occupancy=0.06; 32 blocks >= 32 floor (2/SM x 16 SMs); 2 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+              },
+              {
+                "group": -1,
+                "kind": "gemm_gemm_fused",
+                "accepted": false,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2"
+                ],
+                "predicted": {
+                  "smemBytes": 21504,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0
+                },
+                "gridBlocks": 32,
+                "bytesSaved": 524288,
+                "reason": "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+              },
+              {
+                "group": 1,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 52,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 16
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 16,
+                "bytesSaved": 524288,
+                "reason": "bias_add+relu consumes the matmul accumulator tile straight out of registers: the [64x1024] tile never reaches DRAM (512.0 KB saved) and 2 launch(es) disappear; smem=8.0KB regs=52 threads=256 grid=16 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=16 occupancy=0.63"
+              },
+              {
+                "group": 2,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 4
+                },
+                "metrics": {
+                  "bytesSaved": 65536.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 4,
+                "bytesSaved": 65536,
+                "reason": "bias_add consumes the matmul accumulator tile straight out of registers: the [64x256] tile never reaches DRAM (64.0 KB saved) and 1 launch(es) disappear; smem=8.0KB regs=50 threads=256 grid=4 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=4 occupancy=0.63"
+              }
+            ]
+          }
+        },
+        "unfused": {
+          "cu": "results\\attention_mlp\\attention_mlp_unfused.cu",
+          "compiled": true,
+          "decisions_json": "results\\attention_mlp\\attention_mlp_unfused.decisions.json",
+          "ir": "results\\attention_mlp\\attention_mlp_unfused.ir.txt",
+          "total_ms": 0.249,
+          "regions": {
+            "out.attn_scores": 0.068504,
+            "out.attn_softmax": 0.006631,
+            "out.attn_pv": 0.020835,
+            "out.mlp_fc1": 0.048881,
+            "out.mlp_b1": 0.006397,
+            "out.mlp_act": 0.027157,
+            "out.mlp_fc2": 0.166734,
+            "out.mlp_b2": 0.00478
+          },
+          "ptxas": {
+            "k_out_mlp_b2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_mlp_act": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 7,
+              "smem": 0
+            },
+            "k_out_mlp_b1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_out_attn_pv": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 72,
+              "smem": 8192
+            },
+            "k_out_attn_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 24,
+              "smem": 8
+            },
+            "k_out_attn_scores": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 4096
+            }
+          },
+          "kernel_attrs": {
+            "k_out_attn_scores": {
+              "regs": 128,
+              "smem": 4096,
+              "spills": 0
+            },
+            "k_out_attn_softmax": {
+              "regs": 24,
+              "smem": 8,
+              "spills": 0
+            },
+            "k_out_attn_pv": {
+              "regs": 72,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_fc1": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b1": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_act": {
+              "regs": 7,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_fc2": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b2": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v attention_mlp_unfused.cu -o attention_mlp_unfused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\attention_mlp\\attention_mlp_unfused.cu: 8 kernel(s), 15 IR node(s), 0 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.00044231414309914285,
+            "mean_abs": 6.107829758490423e-05,
+            "max_rel": 3.92192677972268,
+            "ok": true,
+            "worst_violation": -0.01978204754160171
+          },
+          "checksum": 242.463744998,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "attention_mlp.dsl",
+            "mode": "no-fusion",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "out.attn_scores",
+                "kernel": "k_out_attn_scores",
+                "kind": "single",
+                "members": [
+                  "out.attn_scores"
+                ]
+              },
+              {
+                "region": "out.attn_softmax",
+                "kernel": "k_out_attn_softmax",
+                "kind": "single",
+                "members": [
+                  "out.attn_softmax"
+                ]
+              },
+              {
+                "region": "out.attn_pv",
+                "kernel": "k_out_attn_pv",
+                "kind": "single",
+                "members": [
+                  "out.attn_pv"
+                ]
+              },
+              {
+                "region": "out.mlp_fc1",
+                "kernel": "k_out_mlp_fc1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc1"
+                ]
+              },
+              {
+                "region": "out.mlp_b1",
+                "kernel": "k_out_mlp_b1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b1"
+                ]
+              },
+              {
+                "region": "out.mlp_act",
+                "kernel": "k_out_mlp_act",
+                "kind": "single",
+                "members": [
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "out.mlp_fc2",
+                "kernel": "k_out_mlp_fc2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc2"
+                ]
+              },
+              {
+                "region": "out.mlp_b2",
+                "kernel": "k_out_mlp_b2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b2"
+                ]
+              }
+            ],
+            "decisions": []
+          }
+        },
+        "fused_forced": {
+          "cu": "results\\attention_mlp\\attention_mlp_fused_forced.cu",
+          "compiled": true,
+          "decisions_json": "results\\attention_mlp\\attention_mlp_fused_forced.decisions.json",
+          "ir": "results\\attention_mlp\\attention_mlp_fused_forced.ir.txt",
+          "total_ms": 0.388772,
+          "regions": {
+            "attention_fused#0": 0.026858,
+            "gemm_gemm_fused#1": 0.384945
+          },
+          "ptxas": {
+            "k_gemm_gemm_fused_1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 96,
+              "smem": 35328
+            },
+            "k_attention_fused_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 43,
+              "smem": 38912
+            }
+          },
+          "kernel_attrs": {
+            "k_attention_fused_0": {
+              "regs": 43,
+              "smem": 38912,
+              "spills": 0
+            },
+            "k_gemm_gemm_fused_1": {
+              "regs": 96,
+              "smem": 35328,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v attention_mlp_fused_forced.cu -o attention_mlp_fused_forced.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\attention_mlp\\attention_mlp_fused_forced.cu: 2 kernel(s), 15 IR node(s), 2 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0003156038565026442,
+            "mean_abs": 4.520759785633233e-05,
+            "max_rel": 2.0964016205865006,
+            "ok": true,
+            "worst_violation": -0.019899486574483122
+          },
+          "checksum": 242.485593796,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "attention_mlp.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "attention_fused#0",
+                "kernel": "k_attention_fused_0",
+                "kind": "attention_fused",
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ]
+              },
+              {
+                "region": "gemm_gemm_fused#1",
+                "kernel": "k_gemm_gemm_fused_1",
+                "kind": "gemm_gemm_fused",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": 0,
+                "kind": "attention_fused",
+                "accepted": true,
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ],
+                "predicted": {
+                  "smemBytes": 38912,
+                  "regsPerThread": 26,
+                  "occupancyMilli": 250,
+                  "gridBlocks": 8,
+                  "rowsPerBlock": 8,
+                  "dimChunk": 64
+                },
+                "metrics": {
+                  "bytesSaved": 32768.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 8,
+                "bytesSaved": 32768,
+                "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=38.0KB regs=26 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor (2/SM x 16 SMs); 8 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+              },
+              {
+                "group": 1,
+                "kind": "gemm_gemm_fused",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 34816,
+                  "regsPerThread": 64,
+                  "occupancyMilli": 250,
+                  "gridBlocks": 8,
+                  "tileRM": 32,
+                  "tileCN": 64,
+                  "hiddenChunk": 128
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 8,
+                "bytesSaved": 524288,
+                "reason": "GEMM->activation->GEMM (64x1024 x 1024x256, hidden 1024) fused: the [64x1024] hidden tile stays in shared memory instead of round-tripping through DRAM (512.0 KB saved) and the second kernel launch disappears; tile 32x64 hidden-chunk 128, smem=34.0KB regs=64 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor"
+              }
+            ]
+          }
+        },
+        "reference_handwritten": {
+          "cu": "reference/reference_unfused.cu",
+          "compiled": true,
+          "total_ms": 0.159359,
+          "regions": {
+            "out.attn_scores": 0.045602,
+            "out.attn_softmax": 0.013685,
+            "out.attn_pv": 0.023454,
+            "out.mlp_fc1": 0.045075,
+            "out.mlp_b1": 0.011488,
+            "out.mlp_act": 0.027334,
+            "out.mlp_fc2": 0.097997,
+            "out.mlp_b2": 0.004414
+          },
+          "ptxas": {
+            "ref_gemm": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 56,
+              "smem": 4096
+            },
+            "ref_elementwise": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 13,
+              "smem": 0
+            },
+            "ref_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 17,
+              "smem": 128
+            }
+          },
+          "kernel_attrs": {
+            "ref_gemm_nt_scaled": {
+              "regs": 56,
+              "smem": 4096,
+              "spills": 0
+            },
+            "ref_softmax": {
+              "regs": 17,
+              "smem": 128,
+              "spills": 0
+            },
+            "ref_gemm_nn": {
+              "regs": 56,
+              "smem": 4096,
+              "spills": 0
+            },
+            "ref_gemm_fc1": {
+              "regs": 56,
+              "smem": 4096,
+              "spills": 0
+            },
+            "ref_bias_b1": {
+              "regs": 13,
+              "smem": 0,
+              "spills": 0
+            },
+            "ref_relu_act": {
+              "regs": 13,
+              "smem": 0,
+              "spills": 0
+            },
+            "ref_gemm_fc2": {
+              "regs": 56,
+              "smem": 4096,
+              "spills": 0
+            },
+            "ref_bias_b2": {
+              "regs": 13,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "checksum": 242.463744998,
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v reference_unfused.cu -o attention_mlp_reference_handwritten.exe",
+          "correctness_vs_oracle": {
+            "max_abs": 0.00044231414309914285,
+            "mean_abs": 6.107829758490423e-05,
+            "max_rel": 3.92192677972268,
+            "ok": true,
+            "worst_violation": -0.01978204754160171
+          },
+          "correctness_vs_generated_unfused": {
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "max_rel": 0.0,
+            "ok": true,
+            "worst_violation": -0.020000253915786744
+          }
+        }
+      },
+      "sm_count_sensitivity": [
+        {
+          "sm_count": 6,
+          "kernels": 3,
+          "accepted": [
+            "attention_fused:[out.attn_scores, out.attn_softmax, out.attn_pv]",
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        },
+        {
+          "sm_count": 15,
+          "kernels": 3,
+          "accepted": [
+            "attention_fused:[out.attn_scores, out.attn_softmax, out.attn_pv]",
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        }
+      ],
+      "verdicts": [
+        {
+          "region": "attention_fused#0",
+          "kind": "attention_fused",
+          "members": [
+            "out.attn_scores",
+            "out.attn_softmax",
+            "out.attn_pv"
+          ],
+          "fused_ms": 0.072601,
+          "unfused_ms": 0.09597,
+          "delta_ms": 0.023369,
+          "change_pct": 24.350317807648224,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_epilogue#1",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act"
+          ],
+          "fused_ms": 0.066205,
+          "unfused_ms": 0.08243500000000001,
+          "delta_ms": 0.01623000000000001,
+          "change_pct": 19.68823921877844,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_epilogue#2",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.193967,
+          "unfused_ms": 0.171514,
+          "delta_ms": -0.022453,
+          "change_pct": -13.09105962195506,
+          "verdict": "degraded"
+        }
+      ],
+      "verdicts_forced": [
+        {
+          "region": "attention_fused#0",
+          "kind": "attention_fused",
+          "members": [
+            "out.attn_scores",
+            "out.attn_softmax",
+            "out.attn_pv"
+          ],
+          "fused_ms": 0.026858,
+          "unfused_ms": 0.09597,
+          "delta_ms": 0.069112,
+          "change_pct": 72.0141710951339,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_gemm_fused#1",
+          "kind": "gemm_gemm_fused",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act",
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.384945,
+          "unfused_ms": 0.253949,
+          "delta_ms": -0.130996,
+          "change_pct": -51.583585680589415,
+          "verdict": "degraded"
+        }
+      ]
+    },
+    {
+      "workload": "mlp_wide_batch",
+      "dsl": "examples/mlp_wide_batch.dsl",
+      "question": "512 tokens: raises the fused-MLP candidate grid to 64 blocks; the accumulator-register guard still rejects it, and --force-fusion confirms that call",
+      "consts": {
+        "SEQ": 512,
+        "D": 256,
+        "F": 1024
+      },
+      "tensors": {
+        "Q": {
+          "shape": [
+            512,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "K": {
+          "shape": [
+            512,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "V": {
+          "shape": [
+            512,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "W1": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "fp16"
+        },
+        "b1": {
+          "shape": [
+            1024
+          ],
+          "dtype": "fp32"
+        },
+        "W2": {
+          "shape": [
+            1024,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "b2": {
+          "shape": [
+            256
+          ],
+          "dtype": "fp32"
+        }
+      },
+      "variants": {
+        "fused": {
+          "cu": "results\\mlp_wide_batch\\mlp_wide_batch_fused.cu",
+          "compiled": true,
+          "decisions_json": "results\\mlp_wide_batch\\mlp_wide_batch_fused.decisions.json",
+          "ir": "results\\mlp_wide_batch\\mlp_wide_batch_fused.ir.txt",
+          "total_ms": 0.556187,
+          "regions": {
+            "gemm_epilogue#0": 0.170745,
+            "gemm_epilogue#1": 0.180396,
+            "out.attn_scores": 0.161958,
+            "out.attn_softmax": 0.019489,
+            "out.attn_pv": 0.111251
+          },
+          "ptxas": {
+            "k_out_attn_pv": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_attn_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 24,
+              "smem": 32
+            },
+            "k_out_attn_scores": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_gemm_epilogue_1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_gemm_epilogue_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            }
+          },
+          "kernel_attrs": {
+            "k_gemm_epilogue_0": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_gemm_epilogue_1": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_attn_scores": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_attn_softmax": {
+              "regs": 24,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_out_attn_pv": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v mlp_wide_batch_fused.cu -o mlp_wide_batch_fused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\mlp_wide_batch\\mlp_wide_batch_fused.cu: 5 kernel(s), 15 IR node(s), 4 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.00027432342502553553,
+            "mean_abs": 2.777460712763333e-05,
+            "max_rel": 22.838557757746955,
+            "ok": true,
+            "worst_violation": -0.019913738630087188
+          },
+          "checksum": -1874.526137769,
+          "output_elements": 131072,
+          "decision_log": {
+            "source": "mlp_wide_batch.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "gemm_epilogue#0",
+                "kernel": "k_gemm_epilogue_0",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "gemm_epilogue#1",
+                "kernel": "k_gemm_epilogue_1",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              },
+              {
+                "region": "out.attn_scores",
+                "kernel": "k_out_attn_scores",
+                "kind": "single",
+                "members": [
+                  "out.attn_scores"
+                ]
+              },
+              {
+                "region": "out.attn_softmax",
+                "kernel": "k_out_attn_softmax",
+                "kind": "single",
+                "members": [
+                  "out.attn_softmax"
+                ]
+              },
+              {
+                "region": "out.attn_pv",
+                "kernel": "k_out_attn_pv",
+                "kind": "single",
+                "members": [
+                  "out.attn_pv"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": -1,
+                "kind": "attention_fused",
+                "accepted": false,
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ],
+                "predicted": {},
+                "metrics": {},
+                "gridBlocks": 0,
+                "bytesSaved": 2097152,
+                "reason": "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels."
+              },
+              {
+                "group": -1,
+                "kind": "gemm_gemm_fused",
+                "accepted": false,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2"
+                ],
+                "predicted": {
+                  "smemBytes": 21504,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500
+                },
+                "metrics": {
+                  "bytesSaved": 4194304.0
+                },
+                "gridBlocks": 256,
+                "bytesSaved": 4194304,
+                "reason": "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 4096.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+              },
+              {
+                "group": 0,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 52,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 128
+                },
+                "metrics": {
+                  "bytesSaved": 4194304.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 128,
+                "bytesSaved": 4194304,
+                "reason": "bias_add+relu consumes the matmul accumulator tile straight out of registers: the [512x1024] tile never reaches DRAM (4096.0 KB saved) and 2 launch(es) disappear; smem=8.0KB regs=52 threads=256 grid=128 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=128 occupancy=0.63"
+              },
+              {
+                "group": 1,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 32
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 32,
+                "bytesSaved": 524288,
+                "reason": "bias_add consumes the matmul accumulator tile straight out of registers: the [512x256] tile never reaches DRAM (512.0 KB saved) and 1 launch(es) disappear; smem=8.0KB regs=50 threads=256 grid=32 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=32 occupancy=0.63"
+              }
+            ]
+          }
+        },
+        "unfused": {
+          "cu": "results\\mlp_wide_batch\\mlp_wide_batch_unfused.cu",
+          "compiled": true,
+          "decisions_json": "results\\mlp_wide_batch\\mlp_wide_batch_unfused.decisions.json",
+          "ir": "results\\mlp_wide_batch\\mlp_wide_batch_unfused.ir.txt",
+          "total_ms": 0.591981,
+          "regions": {
+            "out.attn_scores": 0.171674,
+            "out.attn_softmax": 0.017144,
+            "out.attn_pv": 0.101587,
+            "out.mlp_fc1": 0.140003,
+            "out.mlp_b1": 0.012546,
+            "out.mlp_act": 0.012433,
+            "out.mlp_fc2": 0.165757,
+            "out.mlp_b2": 0.006007
+          },
+          "ptxas": {
+            "k_out_mlp_b2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_mlp_act": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 7,
+              "smem": 0
+            },
+            "k_out_mlp_b1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_out_attn_pv": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_attn_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 24,
+              "smem": 32
+            },
+            "k_out_attn_scores": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            }
+          },
+          "kernel_attrs": {
+            "k_out_attn_scores": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_attn_softmax": {
+              "regs": 24,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_out_attn_pv": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_fc1": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b1": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_act": {
+              "regs": 7,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_fc2": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b2": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v mlp_wide_batch_unfused.cu -o mlp_wide_batch_unfused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\mlp_wide_batch\\mlp_wide_batch_unfused.cu: 8 kernel(s), 15 IR node(s), 0 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0002817439472473371,
+            "mean_abs": 3.2047773674128614e-05,
+            "max_rel": 25.360161035740006,
+            "ok": true,
+            "worst_violation": -0.01988902027817586
+          },
+          "checksum": -1874.545127869,
+          "output_elements": 131072,
+          "decision_log": {
+            "source": "mlp_wide_batch.dsl",
+            "mode": "no-fusion",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "out.attn_scores",
+                "kernel": "k_out_attn_scores",
+                "kind": "single",
+                "members": [
+                  "out.attn_scores"
+                ]
+              },
+              {
+                "region": "out.attn_softmax",
+                "kernel": "k_out_attn_softmax",
+                "kind": "single",
+                "members": [
+                  "out.attn_softmax"
+                ]
+              },
+              {
+                "region": "out.attn_pv",
+                "kernel": "k_out_attn_pv",
+                "kind": "single",
+                "members": [
+                  "out.attn_pv"
+                ]
+              },
+              {
+                "region": "out.mlp_fc1",
+                "kernel": "k_out_mlp_fc1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc1"
+                ]
+              },
+              {
+                "region": "out.mlp_b1",
+                "kernel": "k_out_mlp_b1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b1"
+                ]
+              },
+              {
+                "region": "out.mlp_act",
+                "kernel": "k_out_mlp_act",
+                "kind": "single",
+                "members": [
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "out.mlp_fc2",
+                "kernel": "k_out_mlp_fc2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc2"
+                ]
+              },
+              {
+                "region": "out.mlp_b2",
+                "kernel": "k_out_mlp_b2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b2"
+                ]
+              }
+            ],
+            "decisions": []
+          }
+        },
+        "fused_forced": {
+          "cu": "results\\mlp_wide_batch\\mlp_wide_batch_fused_forced.cu",
+          "compiled": true,
+          "decisions_json": "results\\mlp_wide_batch\\mlp_wide_batch_fused_forced.decisions.json",
+          "ir": "results\\mlp_wide_batch\\mlp_wide_batch_fused_forced.ir.txt",
+          "total_ms": 1.157052,
+          "regions": {
+            "gemm_gemm_fused#0": 0.969962,
+            "out.attn_scores": 0.149717,
+            "out.attn_softmax": 0.01854,
+            "out.attn_pv": 0.106041
+          },
+          "ptxas": {
+            "k_out_attn_pv": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_attn_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 24,
+              "smem": 32
+            },
+            "k_out_attn_scores": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_gemm_gemm_fused_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 96,
+              "smem": 35328
+            }
+          },
+          "kernel_attrs": {
+            "k_gemm_gemm_fused_0": {
+              "regs": 96,
+              "smem": 35328,
+              "spills": 0
+            },
+            "k_out_attn_scores": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_attn_softmax": {
+              "regs": 24,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_out_attn_pv": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v mlp_wide_batch_fused_forced.cu -o mlp_wide_batch_fused_forced.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\mlp_wide_batch\\mlp_wide_batch_fused_forced.cu: 4 kernel(s), 15 IR node(s), 2 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.00027432342502553553,
+            "mean_abs": 2.777460712763333e-05,
+            "max_rel": 22.838557757746955,
+            "ok": true,
+            "worst_violation": -0.019913738630087188
+          },
+          "checksum": -1874.526137769,
+          "output_elements": 131072,
+          "decision_log": {
+            "source": "mlp_wide_batch.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 15,
+            "regions": [
+              {
+                "region": "gemm_gemm_fused#0",
+                "kernel": "k_gemm_gemm_fused_0",
+                "kind": "gemm_gemm_fused",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              },
+              {
+                "region": "out.attn_scores",
+                "kernel": "k_out_attn_scores",
+                "kind": "single",
+                "members": [
+                  "out.attn_scores"
+                ]
+              },
+              {
+                "region": "out.attn_softmax",
+                "kernel": "k_out_attn_softmax",
+                "kind": "single",
+                "members": [
+                  "out.attn_softmax"
+                ]
+              },
+              {
+                "region": "out.attn_pv",
+                "kernel": "k_out_attn_pv",
+                "kind": "single",
+                "members": [
+                  "out.attn_pv"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": -1,
+                "kind": "attention_fused",
+                "accepted": false,
+                "members": [
+                  "out.attn_scores",
+                  "out.attn_softmax",
+                  "out.attn_pv"
+                ],
+                "predicted": {},
+                "metrics": {},
+                "gridBlocks": 0,
+                "bytesSaved": 2097152,
+                "reason": "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels."
+              },
+              {
+                "group": 0,
+                "kind": "gemm_gemm_fused",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 34816,
+                  "regsPerThread": 64,
+                  "occupancyMilli": 250,
+                  "gridBlocks": 64,
+                  "tileRM": 32,
+                  "tileCN": 64,
+                  "hiddenChunk": 128
+                },
+                "metrics": {
+                  "bytesSaved": 4194304.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 64,
+                "bytesSaved": 4194304,
+                "reason": "GEMM->activation->GEMM (512x1024 x 1024x256, hidden 1024) fused: the [512x1024] hidden tile stays in shared memory instead of round-tripping through DRAM (4096.0 KB saved) and the second kernel launch disappears; tile 32x64 hidden-chunk 128, smem=34.0KB regs=64 threads=256 grid=64 occupancy=0.25; 64 blocks >= 32 floor"
+              }
+            ]
+          }
+        }
+      },
+      "sm_count_sensitivity": [
+        {
+          "sm_count": 6,
+          "kernels": 5,
+          "accepted": [
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels.",
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 4096.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        },
+        {
+          "sm_count": 15,
+          "kernels": 5,
+          "accepted": [
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels.",
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 4096.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        }
+      ],
+      "verdicts": [
+        {
+          "region": "gemm_epilogue#0",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act"
+          ],
+          "fused_ms": 0.170745,
+          "unfused_ms": 0.164982,
+          "delta_ms": -0.005763000000000018,
+          "change_pct": -3.493108339091548,
+          "verdict": "neutral"
+        },
+        {
+          "region": "gemm_epilogue#1",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.180396,
+          "unfused_ms": 0.171764,
+          "delta_ms": -0.008632,
+          "change_pct": -5.025500104794952,
+          "verdict": "degraded"
+        }
+      ],
+      "verdicts_forced": [
+        {
+          "region": "gemm_gemm_fused#0",
+          "kind": "gemm_gemm_fused",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act",
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.969962,
+          "unfused_ms": 0.336746,
+          "delta_ms": -0.633216,
+          "change_pct": -188.0396500626585,
+          "verdict": "degraded"
+        }
+      ]
+    },
+    {
+      "workload": "residual_block",
+      "dsl": "examples/residual_block.dsl",
+      "question": "LayerNorm + attention + residual add + GELU MLP: exercises the other emitters",
+      "consts": {
+        "SEQ": 64,
+        "D": 256,
+        "F": 1024
+      },
+      "tensors": {
+        "x": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "Q": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "K": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "V": {
+          "shape": [
+            64,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "gain": {
+          "shape": [
+            256
+          ],
+          "dtype": "fp32"
+        },
+        "beta": {
+          "shape": [
+            256
+          ],
+          "dtype": "fp32"
+        },
+        "W1": {
+          "shape": [
+            256,
+            1024
+          ],
+          "dtype": "fp16"
+        },
+        "b1": {
+          "shape": [
+            1024
+          ],
+          "dtype": "fp32"
+        },
+        "W2": {
+          "shape": [
+            1024,
+            256
+          ],
+          "dtype": "fp16"
+        },
+        "b2": {
+          "shape": [
+            256
+          ],
+          "dtype": "fp32"
+        }
+      },
+      "variants": {
+        "fused": {
+          "cu": "results\\residual_block\\residual_block_fused.cu",
+          "compiled": true,
+          "decisions_json": "results\\residual_block\\residual_block_fused.decisions.json",
+          "ir": "results\\residual_block\\residual_block_fused.ir.txt",
+          "total_ms": 0.187431,
+          "regions": {
+            "attention_fused#0": 0.03484,
+            "gemm_epilogue#1": 0.046295,
+            "gemm_epilogue#2": 0.125376,
+            "norm.layernorm": 0.005538,
+            "res.add": 0.004102
+          },
+          "ptxas": {
+            "k_res_add": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 9,
+              "smem": 0
+            },
+            "k_norm_layernorm": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 28,
+              "smem": 32
+            },
+            "k_gemm_epilogue_2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_gemm_epilogue_1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_attention_fused_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 43,
+              "smem": 34304
+            }
+          },
+          "kernel_attrs": {
+            "k_attention_fused_0": {
+              "regs": 43,
+              "smem": 34304,
+              "spills": 0
+            },
+            "k_gemm_epilogue_1": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_gemm_epilogue_2": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_norm_layernorm": {
+              "regs": 28,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_res_add": {
+              "regs": 9,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v residual_block_fused.cu -o residual_block_fused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\residual_block\\residual_block_fused.cu: 5 kernel(s), 20 IR node(s), 4 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0014359995100221568,
+            "mean_abs": 0.0002281629485066268,
+            "max_rel": 7.035608343519793,
+            "ok": true,
+            "worst_violation": -0.019379773386612283
+          },
+          "checksum": 275.530111909,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "residual_block.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 20,
+            "regions": [
+              {
+                "region": "attention_fused#0",
+                "kernel": "k_attention_fused_0",
+                "kind": "attention_fused",
+                "members": [
+                  "att.attn_scores",
+                  "att.attn_softmax",
+                  "att.attn_pv"
+                ]
+              },
+              {
+                "region": "gemm_epilogue#1",
+                "kernel": "k_gemm_epilogue_1",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "gemm_epilogue#2",
+                "kernel": "k_gemm_epilogue_2",
+                "kind": "gemm_epilogue",
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              },
+              {
+                "region": "norm.layernorm",
+                "kernel": "k_norm_layernorm",
+                "kind": "single",
+                "members": [
+                  "norm.layernorm"
+                ]
+              },
+              {
+                "region": "res.add",
+                "kernel": "k_res_add",
+                "kind": "single",
+                "members": [
+                  "res.add"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": 0,
+                "kind": "attention_fused",
+                "accepted": true,
+                "members": [
+                  "att.attn_scores",
+                  "att.attn_softmax",
+                  "att.attn_pv"
+                ],
+                "predicted": {
+                  "smemBytes": 34304,
+                  "regsPerThread": 26,
+                  "occupancyMilli": 63,
+                  "gridBlocks": 32,
+                  "rowsPerBlock": 2,
+                  "dimChunk": 64
+                },
+                "metrics": {
+                  "bytesSaved": 32768.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 32,
+                "bytesSaved": 32768,
+                "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=33.5KB regs=26 threads=64 grid=32 occupancy=0.06; 32 blocks >= 32 floor (2/SM x 16 SMs); 2 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+              },
+              {
+                "group": -1,
+                "kind": "gemm_gemm_fused",
+                "accepted": false,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2"
+                ],
+                "predicted": {
+                  "smemBytes": 21504,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0
+                },
+                "gridBlocks": 32,
+                "bytesSaved": 524288,
+                "reason": "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+              },
+              {
+                "group": 1,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 52,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 16
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 16,
+                "bytesSaved": 524288,
+                "reason": "bias_add+gelu consumes the matmul accumulator tile straight out of registers: the [64x1024] tile never reaches DRAM (512.0 KB saved) and 2 launch(es) disappear; smem=8.0KB regs=52 threads=256 grid=16 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=16 occupancy=0.63"
+              },
+              {
+                "group": 2,
+                "kind": "gemm_epilogue",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 8192,
+                  "regsPerThread": 50,
+                  "occupancyMilli": 500,
+                  "gridBlocks": 4
+                },
+                "metrics": {
+                  "bytesSaved": 65536.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 4,
+                "bytesSaved": 65536,
+                "reason": "bias_add consumes the matmul accumulator tile straight out of registers: the [64x256] tile never reaches DRAM (64.0 KB saved) and 1 launch(es) disappear; smem=8.0KB regs=50 threads=256 grid=4 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=4 occupancy=0.63"
+              }
+            ]
+          }
+        },
+        "unfused": {
+          "cu": "results\\residual_block\\residual_block_unfused.cu",
+          "compiled": true,
+          "decisions_json": "results\\residual_block\\residual_block_unfused.decisions.json",
+          "ir": "results\\residual_block\\residual_block_unfused.ir.txt",
+          "total_ms": 0.244039,
+          "regions": {
+            "norm.layernorm": 0.030226,
+            "att.attn_scores": 0.063707,
+            "att.attn_softmax": 0.006066,
+            "att.attn_pv": 0.013389,
+            "res.add": 0.023433,
+            "out.mlp_fc1": 0.049068,
+            "out.mlp_b1": 0.005143,
+            "out.mlp_act": 0.012747,
+            "out.mlp_fc2": 0.137722,
+            "out.mlp_b2": 0.004164
+          },
+          "ptxas": {
+            "k_out_mlp_b2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc2": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 8192
+            },
+            "k_out_mlp_act": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_b1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 8,
+              "smem": 0
+            },
+            "k_out_mlp_fc1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 80,
+              "smem": 8192
+            },
+            "k_res_add": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 9,
+              "smem": 0
+            },
+            "k_att_attn_pv": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 72,
+              "smem": 8192
+            },
+            "k_att_attn_softmax": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 24,
+              "smem": 8
+            },
+            "k_att_attn_scores": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 128,
+              "smem": 4096
+            },
+            "k_norm_layernorm": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 28,
+              "smem": 32
+            }
+          },
+          "kernel_attrs": {
+            "k_norm_layernorm": {
+              "regs": 28,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_att_attn_scores": {
+              "regs": 128,
+              "smem": 4096,
+              "spills": 0
+            },
+            "k_att_attn_softmax": {
+              "regs": 24,
+              "smem": 8,
+              "spills": 0
+            },
+            "k_att_attn_pv": {
+              "regs": 72,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_res_add": {
+              "regs": 9,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_fc1": {
+              "regs": 80,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b1": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_act": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            },
+            "k_out_mlp_fc2": {
+              "regs": 128,
+              "smem": 8192,
+              "spills": 0
+            },
+            "k_out_mlp_b2": {
+              "regs": 8,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v residual_block_unfused.cu -o residual_block_unfused.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\residual_block\\residual_block_unfused.cu: 10 kernel(s), 20 IR node(s), 0 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0021483370773216492,
+            "mean_abs": 0.0003132118436110341,
+            "max_rel": 12.047938260983068,
+            "ok": true,
+            "worst_violation": -0.01891645427783264
+          },
+          "checksum": 275.691007674,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "residual_block.dsl",
+            "mode": "no-fusion",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 20,
+            "regions": [
+              {
+                "region": "norm.layernorm",
+                "kernel": "k_norm_layernorm",
+                "kind": "single",
+                "members": [
+                  "norm.layernorm"
+                ]
+              },
+              {
+                "region": "att.attn_scores",
+                "kernel": "k_att_attn_scores",
+                "kind": "single",
+                "members": [
+                  "att.attn_scores"
+                ]
+              },
+              {
+                "region": "att.attn_softmax",
+                "kernel": "k_att_attn_softmax",
+                "kind": "single",
+                "members": [
+                  "att.attn_softmax"
+                ]
+              },
+              {
+                "region": "att.attn_pv",
+                "kernel": "k_att_attn_pv",
+                "kind": "single",
+                "members": [
+                  "att.attn_pv"
+                ]
+              },
+              {
+                "region": "res.add",
+                "kernel": "k_res_add",
+                "kind": "single",
+                "members": [
+                  "res.add"
+                ]
+              },
+              {
+                "region": "out.mlp_fc1",
+                "kernel": "k_out_mlp_fc1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc1"
+                ]
+              },
+              {
+                "region": "out.mlp_b1",
+                "kernel": "k_out_mlp_b1",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b1"
+                ]
+              },
+              {
+                "region": "out.mlp_act",
+                "kernel": "k_out_mlp_act",
+                "kind": "single",
+                "members": [
+                  "out.mlp_act"
+                ]
+              },
+              {
+                "region": "out.mlp_fc2",
+                "kernel": "k_out_mlp_fc2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_fc2"
+                ]
+              },
+              {
+                "region": "out.mlp_b2",
+                "kernel": "k_out_mlp_b2",
+                "kind": "single",
+                "members": [
+                  "out.mlp_b2"
+                ]
+              }
+            ],
+            "decisions": []
+          }
+        },
+        "fused_forced": {
+          "cu": "results\\residual_block\\residual_block_fused_forced.cu",
+          "compiled": true,
+          "decisions_json": "results\\residual_block\\residual_block_fused_forced.decisions.json",
+          "ir": "results\\residual_block\\residual_block_fused_forced.ir.txt",
+          "total_ms": 0.433672,
+          "regions": {
+            "attention_fused#0": 0.03025,
+            "gemm_gemm_fused#1": 0.539982,
+            "norm.layernorm": 0.006295,
+            "res.add": 0.004477
+          },
+          "ptxas": {
+            "k_res_add": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 9,
+              "smem": 0
+            },
+            "k_norm_layernorm": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 28,
+              "smem": 32
+            },
+            "k_gemm_gemm_fused_1": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 96,
+              "smem": 35328
+            },
+            "k_attention_fused_0": {
+              "stack": 0,
+              "spill_stores": 0,
+              "spill_loads": 0,
+              "regs": 43,
+              "smem": 38912
+            }
+          },
+          "kernel_attrs": {
+            "k_attention_fused_0": {
+              "regs": 43,
+              "smem": 38912,
+              "spills": 0
+            },
+            "k_gemm_gemm_fused_1": {
+              "regs": 96,
+              "smem": 35328,
+              "spills": 0
+            },
+            "k_norm_layernorm": {
+              "regs": 28,
+              "smem": 32,
+              "spills": 0
+            },
+            "k_res_add": {
+              "regs": 9,
+              "smem": 0,
+              "spills": 0
+            }
+          },
+          "device": {
+            "name": "NVIDIA GeForce GTX 1070",
+            "cc": "6.1",
+            "sm_count": 16
+          },
+          "run_error": null,
+          "nvcc_command": "nvcc -arch=sm_61 -O3 -Xptxas -v residual_block_fused_forced.cu -o residual_block_fused_forced.exe",
+          "compiler_stdout": "emitted C:\\Users\\Administrator\\Desktop\\compilerproject\\results\\residual_block\\residual_block_fused_forced.cu: 4 kernel(s), 20 IR node(s), 2 decision(s)",
+          "correctness_vs_oracle": {
+            "max_abs": 0.0014359995100221568,
+            "mean_abs": 0.0002281629485066268,
+            "max_rel": 7.035608343519793,
+            "ok": true,
+            "worst_violation": -0.019379773386612283
+          },
+          "checksum": 275.530111909,
+          "output_elements": 16384,
+          "decision_log": {
+            "source": "residual_block.dsl",
+            "mode": "fuse",
+            "target": "sm_61",
+            "smCount": 16,
+            "irNodes": 20,
+            "regions": [
+              {
+                "region": "attention_fused#0",
+                "kernel": "k_attention_fused_0",
+                "kind": "attention_fused",
+                "members": [
+                  "att.attn_scores",
+                  "att.attn_softmax",
+                  "att.attn_pv"
+                ]
+              },
+              {
+                "region": "gemm_gemm_fused#1",
+                "kernel": "k_gemm_gemm_fused_1",
+                "kind": "gemm_gemm_fused",
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ]
+              },
+              {
+                "region": "norm.layernorm",
+                "kernel": "k_norm_layernorm",
+                "kind": "single",
+                "members": [
+                  "norm.layernorm"
+                ]
+              },
+              {
+                "region": "res.add",
+                "kernel": "k_res_add",
+                "kind": "single",
+                "members": [
+                  "res.add"
+                ]
+              }
+            ],
+            "decisions": [
+              {
+                "group": 0,
+                "kind": "attention_fused",
+                "accepted": true,
+                "members": [
+                  "att.attn_scores",
+                  "att.attn_softmax",
+                  "att.attn_pv"
+                ],
+                "predicted": {
+                  "smemBytes": 38912,
+                  "regsPerThread": 26,
+                  "occupancyMilli": 250,
+                  "gridBlocks": 8,
+                  "rowsPerBlock": 8,
+                  "dimChunk": 64
+                },
+                "metrics": {
+                  "bytesSaved": 32768.0,
+                  "launchesSaved": 2.0
+                },
+                "gridBlocks": 8,
+                "bytesSaved": 32768,
+                "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=38.0KB regs=26 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor (2/SM x 16 SMs); 8 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+              },
+              {
+                "group": 1,
+                "kind": "gemm_gemm_fused",
+                "accepted": true,
+                "members": [
+                  "out.mlp_fc1",
+                  "out.mlp_b1",
+                  "out.mlp_act",
+                  "out.mlp_fc2",
+                  "out.mlp_b2"
+                ],
+                "predicted": {
+                  "smemBytes": 34816,
+                  "regsPerThread": 64,
+                  "occupancyMilli": 250,
+                  "gridBlocks": 8,
+                  "tileRM": 32,
+                  "tileCN": 64,
+                  "hiddenChunk": 128
+                },
+                "metrics": {
+                  "bytesSaved": 524288.0,
+                  "launchesSaved": 1.0
+                },
+                "gridBlocks": 8,
+                "bytesSaved": 524288,
+                "reason": "GEMM->activation->GEMM (64x1024 x 1024x256, hidden 1024) fused: the [64x1024] hidden tile stays in shared memory instead of round-tripping through DRAM (512.0 KB saved) and the second kernel launch disappears; tile 32x64 hidden-chunk 128, smem=34.0KB regs=64 threads=256 grid=8 occupancy=0.25; 8 blocks >= 32 floor"
+              }
+            ]
+          }
+        }
+      },
+      "sm_count_sensitivity": [
+        {
+          "sm_count": 6,
+          "kernels": 5,
+          "accepted": [
+            "attention_fused:[att.attn_scores, att.attn_softmax, att.attn_pv]",
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        },
+        {
+          "sm_count": 15,
+          "kernels": 5,
+          "accepted": [
+            "attention_fused:[att.attn_scores, att.attn_softmax, att.attn_pv]",
+            "gemm_epilogue:[out.mlp_fc1, out.mlp_b1, out.mlp_act]",
+            "gemm_epilogue:[out.mlp_fc2, out.mlp_b2]"
+          ],
+          "rejected": [
+            "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+          ]
+        }
+      ],
+      "verdicts": [
+        {
+          "region": "attention_fused#0",
+          "kind": "attention_fused",
+          "members": [
+            "att.attn_scores",
+            "att.attn_softmax",
+            "att.attn_pv"
+          ],
+          "fused_ms": 0.03484,
+          "unfused_ms": 0.083162,
+          "delta_ms": 0.048322,
+          "change_pct": 58.10586565979654,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_epilogue#1",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act"
+          ],
+          "fused_ms": 0.046295,
+          "unfused_ms": 0.066958,
+          "delta_ms": 0.020663,
+          "change_pct": 30.859643358523254,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_epilogue#2",
+          "kind": "gemm_epilogue",
+          "members": [
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.125376,
+          "unfused_ms": 0.141886,
+          "delta_ms": 0.016510000000000025,
+          "change_pct": 11.636102222911369,
+          "verdict": "improved"
+        }
+      ],
+      "verdicts_forced": [
+        {
+          "region": "attention_fused#0",
+          "kind": "attention_fused",
+          "members": [
+            "att.attn_scores",
+            "att.attn_softmax",
+            "att.attn_pv"
+          ],
+          "fused_ms": 0.03025,
+          "unfused_ms": 0.083162,
+          "delta_ms": 0.052912,
+          "change_pct": 63.625213438830244,
+          "verdict": "improved"
+        },
+        {
+          "region": "gemm_gemm_fused#1",
+          "kind": "gemm_gemm_fused",
+          "members": [
+            "out.mlp_fc1",
+            "out.mlp_b1",
+            "out.mlp_act",
+            "out.mlp_fc2",
+            "out.mlp_b2"
+          ],
+          "fused_ms": 0.539982,
+          "unfused_ms": 0.208844,
+          "delta_ms": -0.33113799999999993,
+          "change_pct": -158.55758365095474,
+          "verdict": "degraded"
+        }
+      ]
+    }
+  ]
+}

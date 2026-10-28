@@ -1,0 +1,12 @@
+region,ms_per_iter
+"norm.layernorm",0.030226
+"att.attn_scores",0.063707
+"att.attn_softmax",0.006066
+"att.attn_pv",0.013389
+"res.add",0.023433
+"out.mlp_fc1",0.049068
+"out.mlp_b1",0.005143
+"out.mlp_act",0.012747
+"out.mlp_fc2",0.137722
+"out.mlp_b2",0.004164
+"TOTAL",0.244039

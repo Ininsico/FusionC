@@ -1,0 +1,19 @@
+{
+  "source": "attention_mlp.dsl",
+  "mode": "no-fusion",
+  "target": "sm_61",
+  "smCount": 16,
+  "irNodes": 15,
+  "regions": [
+    { "region": "out.attn_scores", "kernel": "k_out_attn_scores", "kind": "single", "members": ["out.attn_scores"] },
+    { "region": "out.attn_softmax", "kernel": "k_out_attn_softmax", "kind": "single", "members": ["out.attn_softmax"] },
+    { "region": "out.attn_pv", "kernel": "k_out_attn_pv", "kind": "single", "members": ["out.attn_pv"] },
+    { "region": "out.mlp_fc1", "kernel": "k_out_mlp_fc1", "kind": "single", "members": ["out.mlp_fc1"] },
+    { "region": "out.mlp_b1", "kernel": "k_out_mlp_b1", "kind": "single", "members": ["out.mlp_b1"] },
+    { "region": "out.mlp_act", "kernel": "k_out_mlp_act", "kind": "single", "members": ["out.mlp_act"] },
+    { "region": "out.mlp_fc2", "kernel": "k_out_mlp_fc2", "kind": "single", "members": ["out.mlp_fc2"] },
+    { "region": "out.mlp_b2", "kernel": "k_out_mlp_b2", "kind": "single", "members": ["out.mlp_b2"] }
+  ],
+  "decisions": [
+  ]
+}

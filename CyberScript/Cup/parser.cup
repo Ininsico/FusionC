@@ -1,0 +1,82 @@
+import java_cup.runtime.*;
+
+terminal NETWORK, DEVICE;
+terminal SET, SCAN, ALERT, LOG, BLOCK, REPORT;
+terminal IF, END;
+terminal PORT, OPEN, CLOSED, TRAFFIC, ATTACK, DETECTED;
+terminal SOURCE, ADMIN;
+terminal DDOS, BRUTEFORCE, PORTSCAN;
+terminal ASSIGN, GT, LT, GE, LE, EQ, NE;
+terminal PLUS, MINUS, MULT, DIV, LPAREN, RPAREN;
+terminal String ID, NUMBER, STRING;
+
+non terminal program, stmt_list, stmt;
+non terminal network_decl, device_decl, set_stmt, scan_stmt;
+non terminal report_stmt, action_stmt, if_stmt;
+non terminal condition, attack_type, relop, expr;
+
+precedence left PLUS, MINUS;
+precedence left MULT, DIV;
+
+start with program;
+
+program ::= stmt_list
+    {: System.out.println("Syntax valid"); :} ;
+
+stmt_list ::= stmt_list stmt
+            | stmt ;
+
+stmt ::= network_decl
+       | device_decl
+       | set_stmt
+       | scan_stmt
+       | if_stmt
+       | action_stmt
+       | report_stmt ;
+
+network_decl ::= NETWORK ID
+    {: System.out.println("Network declaration parsed"); :} ;
+
+device_decl ::= DEVICE ID
+    {: System.out.println("Device declaration parsed"); :} ;
+
+set_stmt ::= SET ID ASSIGN expr
+    {: System.out.println("SET statement parsed"); :} ;
+
+scan_stmt ::= SCAN ID
+    {: System.out.println("SCAN statement parsed"); :}
+            | SCAN PORT NUMBER
+    {: System.out.println("SCAN statement parsed"); :} ;
+
+report_stmt ::= REPORT
+    {: System.out.println("REPORT statement parsed"); :} ;
+
+action_stmt ::= ALERT STRING
+    {: System.out.println("ALERT statement parsed"); :}
+              | ALERT ADMIN
+    {: System.out.println("ALERT statement parsed"); :}
+              | LOG STRING
+    {: System.out.println("LOG statement parsed"); :}
+              | BLOCK SOURCE
+    {: System.out.println("BLOCK statement parsed"); :} ;
+
+if_stmt ::= IF condition stmt_list END
+    {: System.out.println("IF statement parsed"); :} ;
+
+condition ::= PORT NUMBER OPEN
+            | PORT NUMBER CLOSED
+            | ATTACK attack_type DETECTED
+            | expr relop expr ;
+
+attack_type ::= DDOS | BRUTEFORCE | PORTSCAN ;
+
+relop ::= GT | LT | GE | LE | EQ | NE ;
+
+expr ::= expr PLUS expr
+       | expr MINUS expr
+       | expr MULT expr
+       | expr DIV expr
+       | LPAREN expr RPAREN
+       | ID
+       | NUMBER
+       | TRAFFIC ;

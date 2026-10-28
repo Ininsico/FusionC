@@ -1,0 +1,20 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z9k_res_addP6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z9k_res_addP6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 9 registers, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z16k_norm_layernormP6__halfPKS_PKfS4_' for 'sm_61'
+ptxas info    : Function properties for _Z16k_norm_layernormP6__halfPKS_PKfS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 28 registers, 32 bytes smem, 352 bytes cmem[0], 4 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z19k_gemm_gemm_fused_1P6__halfPKS_S2_PKfS2_S4_' for 'sm_61'
+ptxas info    : Function properties for _Z19k_gemm_gemm_fused_1P6__halfPKS_S2_PKfS2_S4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, 35328 bytes smem, 368 bytes cmem[0], 32 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z19k_attention_fused_0P6__halfPKS_S2_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z19k_attention_fused_0P6__halfPKS_S2_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 43 registers, 38912 bytes smem, 352 bytes cmem[0], 28 bytes cmem[2]
+residual_block_fused_forced.cu
+   Creating library C:\Users\Administrator\Desktop\compilerproject\results\residual_block\residual_block_fused_forced.lib and object C:\Users\Administrator\Desktop\compilerproject\results\residual_block\residual_block_fused_forced.exp
+

@@ -1,0 +1,10 @@
+region,ms_per_iter
+"out.attn_scores",0.068504
+"out.attn_softmax",0.006631
+"out.attn_pv",0.020835
+"out.mlp_fc1",0.048881
+"out.mlp_b1",0.006397
+"out.mlp_act",0.027157
+"out.mlp_fc2",0.166734
+"out.mlp_b2",0.004780
+"TOTAL",0.249000

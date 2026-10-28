@@ -1,0 +1,4 @@
+region,ms_per_iter
+"attention_fused#0",0.026858
+"gemm_gemm_fused#1",0.384945
+"TOTAL",0.388772

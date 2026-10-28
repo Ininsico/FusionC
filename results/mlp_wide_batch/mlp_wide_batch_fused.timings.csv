@@ -1,0 +1,7 @@
+region,ms_per_iter
+"gemm_epilogue#0",0.170745
+"gemm_epilogue#1",0.180396
+"out.attn_scores",0.161958
+"out.attn_softmax",0.019489
+"out.attn_pv",0.111251
+"TOTAL",0.556187

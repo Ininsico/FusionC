@@ -1,0 +1,44 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z12k_out_mlp_b2P6__halfPKS_PKf' for 'sm_61'
+ptxas info    : Function properties for _Z12k_out_mlp_b2P6__halfPKS_PKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z13k_out_mlp_fc2P6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z13k_out_mlp_fc2P6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, 8192 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z13k_out_mlp_actP6__halfPKS_' for 'sm_61'
+ptxas info    : Function properties for _Z13k_out_mlp_actP6__halfPKS_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, 336 bytes cmem[0], 28 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z12k_out_mlp_b1P6__halfPKS_PKf' for 'sm_61'
+ptxas info    : Function properties for _Z12k_out_mlp_b1P6__halfPKS_PKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z13k_out_mlp_fc1P6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z13k_out_mlp_fc1P6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, 8192 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z9k_res_addP6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z9k_res_addP6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 9 registers, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z13k_att_attn_pvP6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z13k_att_attn_pvP6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 72 registers, 8192 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z18k_att_attn_softmaxP6__halfPKf' for 'sm_61'
+ptxas info    : Function properties for _Z18k_att_attn_softmaxP6__halfPKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, 8 bytes smem, 336 bytes cmem[0], 28 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z17k_att_attn_scoresPfPK6__halfS2_' for 'sm_61'
+ptxas info    : Function properties for _Z17k_att_attn_scoresPfPK6__halfS2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, 4096 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z16k_norm_layernormP6__halfPKS_PKfS4_' for 'sm_61'
+ptxas info    : Function properties for _Z16k_norm_layernormP6__halfPKS_PKfS4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 28 registers, 32 bytes smem, 352 bytes cmem[0], 4 bytes cmem[2]
+residual_block_unfused.cu
+   Creating library C:\Users\Administrator\Desktop\compilerproject\results\residual_block\residual_block_unfused.lib and object C:\Users\Administrator\Desktop\compilerproject\results\residual_block\residual_block_unfused.exp
+

@@ -1,0 +1,60 @@
+{
+  "source": "mlp_wide_batch.dsl",
+  "mode": "fuse",
+  "target": "sm_61",
+  "smCount": 6,
+  "irNodes": 15,
+  "regions": [
+    { "region": "gemm_epilogue#0", "kernel": "k_gemm_epilogue_0", "kind": "gemm_epilogue", "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act"] },
+    { "region": "gemm_epilogue#1", "kernel": "k_gemm_epilogue_1", "kind": "gemm_epilogue", "members": ["out.mlp_fc2", "out.mlp_b2"] },
+    { "region": "out.attn_scores", "kernel": "k_out_attn_scores", "kind": "single", "members": ["out.attn_scores"] },
+    { "region": "out.attn_softmax", "kernel": "k_out_attn_softmax", "kind": "single", "members": ["out.attn_softmax"] },
+    { "region": "out.attn_pv", "kernel": "k_out_attn_pv", "kind": "single", "members": ["out.attn_pv"] }
+  ],
+  "decisions": [
+  {
+    "group": -1,
+    "kind": "attention_fused",
+    "accepted": false,
+    "members": ["out.attn_scores", "out.attn_softmax", "out.attn_pv"],
+    "predicted": {},
+    "metrics": {},
+    "gridBlocks": 0,
+    "bytesSaved": 2097152,
+    "reason": "rejected: 512 keys exceed the 64-key band the Pascal fused-attention emitter supports (wider rows would need online softmax rescaling across bands); keeping 3 unfused kernels."
+  },
+  {
+    "group": -1,
+    "kind": "gemm_gemm_fused",
+    "accepted": false,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2"],
+    "predicted": { "smemBytes": 21504, "regsPerThread": 50, "occupancyMilli": 500 },
+    "metrics": { "bytesSaved": 4194304.0000 },
+    "gridBlocks": 256,
+    "bytesSaved": 4194304,
+    "reason": "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 4096.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+  },
+  {
+    "group": 0,
+    "kind": "gemm_epilogue",
+    "accepted": true,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act"],
+    "predicted": { "smemBytes": 8192, "regsPerThread": 52, "occupancyMilli": 500, "gridBlocks": 128 },
+    "metrics": { "bytesSaved": 4194304.0000, "launchesSaved": 2.0000 },
+    "gridBlocks": 128,
+    "bytesSaved": 4194304,
+    "reason": "bias_add+relu consumes the matmul accumulator tile straight out of registers: the [512x1024] tile never reaches DRAM (4096.0 KB saved) and 2 launch(es) disappear; smem=8.0KB regs=52 threads=256 grid=128 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=128 occupancy=0.63"
+  },
+  {
+    "group": 1,
+    "kind": "gemm_epilogue",
+    "accepted": true,
+    "members": ["out.mlp_fc2", "out.mlp_b2"],
+    "predicted": { "smemBytes": 8192, "regsPerThread": 50, "occupancyMilli": 500, "gridBlocks": 32 },
+    "metrics": { "bytesSaved": 524288.0000, "launchesSaved": 1.0000 },
+    "gridBlocks": 32,
+    "bytesSaved": 524288,
+    "reason": "bias_add consumes the matmul accumulator tile straight out of registers: the [512x256] tile never reaches DRAM (512.0 KB saved) and 1 launch(es) disappear; smem=8.0KB regs=50 threads=256 grid=32 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=32 occupancy=0.63"
+  }
+  ]
+}

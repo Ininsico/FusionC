@@ -1,0 +1,16 @@
+id   name                   op         shape     store/acc   placement  group  inputs -> consumers
+0    Q                      INPUT      512x256   half/float  GLOBAL     -      (none) -> out.attn_scores
+1    K                      INPUT      512x256   half/float  GLOBAL     -      (none) -> out.attn_scores
+2    V                      INPUT      512x256   half/float  GLOBAL     -      (none) -> out.attn_pv
+3    W1                     PARAM      256x1024  half/float  GLOBAL     -      (none) -> out.mlp_fc1
+4    b1                     PARAM      1x1024    float/float GLOBAL     -      (none) -> out.mlp_b1
+5    W2                     PARAM      1024x256  half/float  GLOBAL     -      (none) -> out.mlp_fc2
+6    b2                     PARAM      1x256     float/float GLOBAL     -      (none) -> out.mlp_b2
+7    out.attn_scores        MATMUL     512x512   float/float GLOBAL     1      Q,K -> out.attn_softmax
+8    out.attn_softmax       SOFTMAX    512x512   half/float  GLOBAL     2      out.attn_scores -> out.attn_pv
+9    out.attn_pv            MATMUL     512x256   half/float  GLOBAL     3      out.attn_softmax,V -> out.mlp_fc1
+10   out.mlp_fc1            MATMUL     512x1024  half/float  SHARED     0      out.attn_pv,W1 -> out.mlp_b1 (fused, no DRAM buffer)
+11   out.mlp_b1             BIAS_ADD   512x1024  half/float  REGISTER   0      out.mlp_fc1,b1 -> out.mlp_act (fused, no DRAM buffer)
+12   out.mlp_act            RELU       512x1024  half/float  REGISTER   0      out.mlp_b1 -> out.mlp_fc2 (fused, no DRAM buffer)
+13   out.mlp_fc2            MATMUL     512x256   half/float  REGISTER   0      out.mlp_act,W2 -> out.mlp_b2 (fused, no DRAM buffer)
+14   out.mlp_b2             BIAS_ADD   512x256   half/float  REGISTER   0      out.mlp_fc2,b2 -> (dead)

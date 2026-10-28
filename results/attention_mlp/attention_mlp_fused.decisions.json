@@ -1,0 +1,58 @@
+{
+  "source": "attention_mlp.dsl",
+  "mode": "fuse",
+  "target": "sm_61",
+  "smCount": 16,
+  "irNodes": 15,
+  "regions": [
+    { "region": "attention_fused#0", "kernel": "k_attention_fused_0", "kind": "attention_fused", "members": ["out.attn_scores", "out.attn_softmax", "out.attn_pv"] },
+    { "region": "gemm_epilogue#1", "kernel": "k_gemm_epilogue_1", "kind": "gemm_epilogue", "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act"] },
+    { "region": "gemm_epilogue#2", "kernel": "k_gemm_epilogue_2", "kind": "gemm_epilogue", "members": ["out.mlp_fc2", "out.mlp_b2"] }
+  ],
+  "decisions": [
+  {
+    "group": 0,
+    "kind": "attention_fused",
+    "accepted": true,
+    "members": ["out.attn_scores", "out.attn_softmax", "out.attn_pv"],
+    "predicted": { "smemBytes": 34304, "regsPerThread": 26, "occupancyMilli": 63, "gridBlocks": 32, "rowsPerBlock": 2, "dimChunk": 64 },
+    "metrics": { "bytesSaved": 32768.0000, "launchesSaved": 2.0000 },
+    "gridBlocks": 32,
+    "bytesSaved": 32768,
+    "reason": "QK^T+softmax+PV is a reduction-free chain: fusing removes a [64x64] fp32 score tile and a [64x64] fp16 probability tile from DRAM (32.0 KB saved) plus 2 launches; smem=33.5KB regs=26 threads=64 grid=32 occupancy=0.06; 32 blocks >= 32 floor (2/SM x 16 SMs); 2 query rows/block (one warp each), K/V staged in 64-wide dimension chunks through a doubled shared buffer (no cp.async on Pascal -> next chunk issued before the current chunk's FMAs)"
+  },
+  {
+    "group": -1,
+    "kind": "gemm_gemm_fused",
+    "accepted": false,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act", "out.mlp_fc2"],
+    "predicted": { "smemBytes": 21504, "regsPerThread": 50, "occupancyMilli": 500 },
+    "metrics": { "bytesSaved": 524288.0000 },
+    "gridBlocks": 32,
+    "bytesSaved": 524288,
+    "reason": "rejected: candidate tile 8x64 leaves only 2 accumulator registers per thread (< 4): the inner loop would be shared-memory bound; keeping 4 unfused kernels (the 512.0 KB of DRAM traffic saved does not compensate for the lost parallelism)"
+  },
+  {
+    "group": 1,
+    "kind": "gemm_epilogue",
+    "accepted": true,
+    "members": ["out.mlp_fc1", "out.mlp_b1", "out.mlp_act"],
+    "predicted": { "smemBytes": 8192, "regsPerThread": 52, "occupancyMilli": 500, "gridBlocks": 16 },
+    "metrics": { "bytesSaved": 524288.0000, "launchesSaved": 2.0000 },
+    "gridBlocks": 16,
+    "bytesSaved": 524288,
+    "reason": "bias_add+relu consumes the matmul accumulator tile straight out of registers: the [64x1024] tile never reaches DRAM (512.0 KB saved) and 2 launch(es) disappear; smem=8.0KB regs=52 threads=256 grid=16 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=16 occupancy=0.63"
+  },
+  {
+    "group": 2,
+    "kind": "gemm_epilogue",
+    "accepted": true,
+    "members": ["out.mlp_fc2", "out.mlp_b2"],
+    "predicted": { "smemBytes": 8192, "regsPerThread": 50, "occupancyMilli": 500, "gridBlocks": 4 },
+    "metrics": { "bytesSaved": 65536.0000, "launchesSaved": 1.0000 },
+    "gridBlocks": 4,
+    "bytesSaved": 65536,
+    "reason": "bias_add consumes the matmul accumulator tile straight out of registers: the [64x256] tile never reaches DRAM (64.0 KB saved) and 1 launch(es) disappear; smem=8.0KB regs=50 threads=256 grid=4 occupancy=0.50 vs unfused smem=8.0KB regs=48 threads=256 grid=4 occupancy=0.63"
+  }
+  ]
+}

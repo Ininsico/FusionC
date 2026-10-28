@@ -1,0 +1,6 @@
+region,ms_per_iter
+"attention_fused#0",0.030250
+"gemm_gemm_fused#1",0.539982
+"norm.layernorm",0.006295
+"res.add",0.004477
+"TOTAL",0.433672

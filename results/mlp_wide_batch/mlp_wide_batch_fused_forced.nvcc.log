@@ -1,0 +1,20 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z13k_out_attn_pvP6__halfPKS_S2_' for 'sm_61'
+ptxas info    : Function properties for _Z13k_out_attn_pvP6__halfPKS_S2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, 8192 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z18k_out_attn_softmaxP6__halfPKf' for 'sm_61'
+ptxas info    : Function properties for _Z18k_out_attn_softmaxP6__halfPKf
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, 32 bytes smem, 336 bytes cmem[0], 28 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z17k_out_attn_scoresPfPK6__halfS2_' for 'sm_61'
+ptxas info    : Function properties for _Z17k_out_attn_scoresPfPK6__halfS2_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, 8192 bytes smem, 344 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z19k_gemm_gemm_fused_0P6__halfPKS_S2_PKfS2_S4_' for 'sm_61'
+ptxas info    : Function properties for _Z19k_gemm_gemm_fused_0P6__halfPKS_S2_PKfS2_S4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, 35328 bytes smem, 368 bytes cmem[0], 4 bytes cmem[2]
+mlp_wide_batch_fused_forced.cu
+   Creating library C:\Users\Administrator\Desktop\compilerproject\results\mlp_wide_batch\mlp_wide_batch_fused_forced.lib and object C:\Users\Administrator\Desktop\compilerproject\results\mlp_wide_batch\mlp_wide_batch_fused_forced.exp
+

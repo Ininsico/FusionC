@@ -1,0 +1,20 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_Z8ref_gemmILi32ELi32ELi32ELi16ELi8ELb1EEvPK6__halfS2_Pviiiif' for 'sm_61'
+ptxas info    : Function properties for _Z8ref_gemmILi32ELi32ELi32ELi16ELi8ELb1EEvPK6__halfS2_Pviiiif
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 56 registers, 4096 bytes smem, 364 bytes cmem[0], 4 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z8ref_gemmILi32ELi32ELi32ELi16ELi8ELb0EEvPK6__halfS2_Pviiiif' for 'sm_61'
+ptxas info    : Function properties for _Z8ref_gemmILi32ELi32ELi32ELi16ELi8ELb0EEvPK6__halfS2_Pviiiif
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 56 registers, 4096 bytes smem, 364 bytes cmem[0], 4 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z15ref_elementwiseP6__halfPKS_PKfiii' for 'sm_61'
+ptxas info    : Function properties for _Z15ref_elementwiseP6__halfPKS_PKfiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 13 registers, 356 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z11ref_softmaxPKfP6__halfii' for 'sm_61'
+ptxas info    : Function properties for _Z11ref_softmaxPKfP6__halfii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 17 registers, 128 bytes smem, 344 bytes cmem[0], 24 bytes cmem[2]
+reference_unfused.cu
+   Creating library C:\Users\Administrator\Desktop\compilerproject\results\attention_mlp\attention_mlp_reference_handwritten.lib and object C:\Users\Administrator\Desktop\compilerproject\results\attention_mlp\attention_mlp_reference_handwritten.exp
+
